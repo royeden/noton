@@ -1,4 +1,5 @@
 #include <SDL2/SDL.h>
+#include <portmidi.h>
 #include <stdio.h>
 
 #define HOR 32
@@ -27,7 +28,7 @@ typedef struct Cable {
 } Cable;
 
 typedef struct Gate {
-	int polarity, id, x, y, len;
+	int polarity, id, x, y, outlen;
 	GateType type;
 	Cable *a, *b, *outputs[32];
 } Gate;
@@ -89,10 +90,9 @@ polarize(Gate* g)
 		g->polarity = -1;
 	else
 		g->polarity = !!g->a->polarity == !!g->b->polarity;
-
-	for(i = 0; i < g->len; ++i) {
+	/* update outputs */
+	for(i = 0; i < g->outlen; ++i)
 		g->outputs[i]->polarity = g->polarity;
-	}
 }
 
 void
@@ -102,7 +102,7 @@ bang(Gate* g, int depth)
 	if(a < 1 || !g)
 		return;
 	polarize(g);
-	for(i = 0; i < g->len; ++i) {
+	for(i = 0; i < g->outlen; ++i) {
 		Gate* next = findgateid(&arena, g->outputs[i]->b);
 		bang(next, a);
 	}
@@ -180,7 +180,7 @@ terminate(Cable* c, Brush* b)
 		newcable->len++;
 	}
 	/* connect */
-	gatefrom->outputs[gatefrom->len++] = newcable;
+	gatefrom->outputs[gatefrom->outlen++] = newcable;
 	if(!gateto->a)
 		gateto->a = newcable;
 	else
