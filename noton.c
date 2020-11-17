@@ -9,7 +9,7 @@
 #define color2 0x000000
 #define color3 0xcccccc
 #define color4 0x72dec2
-#define color0 0xff0000 /* 0xffb545 */
+#define color0 0xffb545
 
 #define SZ (HOR * VER * 16)
 
@@ -19,12 +19,14 @@ typedef struct {
 
 typedef struct Cable {
 	Point2d points[256];
-	int id, a, b, len;
+	int id, a, b, polarity, len;
 } Cable;
 
 typedef struct Gate {
 	int polarity, type, id, x, y;
-	Cable *a, *b, *c;
+	Cable *a, *b;
+	Cable* outputs[32];
+	int outputs_len;
 } Gate;
 
 typedef struct Arena {
@@ -75,6 +77,34 @@ findgate(int x, int y)
 	return NULL;
 }
 
+void
+polarize(Gate* g)
+{
+	int i;
+	if(!g->type)
+		;
+	else if(!g->a || !g->b || (g->a && g->a->polarity < 0) || (g->b && g->b->polarity < 0))
+		g->polarity = -1;
+	else
+		g->polarity = !!g->a->polarity ^ !!g->b->polarity;
+
+	for(i = 0; i < g->outputs_len; ++i) {
+		g->outputs[i]->polarity = g->polarity;
+	}
+}
+
+void
+bang(Gate* g)
+{
+	polarize(g);
+}
+
+int
+polaritycolor(int polarity)
+{
+	return polarity == 1 ? color4 : polarity == 0 ? color4 : color3;
+}
+
 /* Cabling */
 
 void
@@ -91,8 +121,11 @@ void
 begin(Cable* c, Brush* b)
 {
 	Gate* gate = findgate(b->x, b->y);
-	b->x = gate ? gate->x : b->x;
-	b->y = gate ? gate->y : b->y;
+	if(gate) {
+		b->cable.polarity = gate->polarity;
+		b->x = gate->x;
+		b->y = gate->y;
+	}
 	c->len = 0;
 	append(c, b);
 }
@@ -133,21 +166,25 @@ terminate(Cable* c, Brush* b)
 		cp->y = bp->y;
 		newcable->len++;
 	}
-	gatefrom->c = &arena.cables[arena.cables_len];
+	/* connect */
+	gatefrom->outputs[gatefrom->outputs_len++] = newcable;
 	if(!gateto->a)
-		gateto->a = &arena.cables[arena.cables_len];
+		gateto->a = newcable;
 	else
-		gateto->b = &arena.cables[arena.cables_len];
+		gateto->b = newcable;
+	polarize(gateto);
 	arena.cables_len++;
 	return abandon(c);
 }
 
 Gate*
-addgate(Arena* a, int type, int x, int y)
+addgate(Arena* a, int type, int polarity, int x, int y)
 {
 	a->gates[a->gates_len].x = x;
 	a->gates[a->gates_len].y = y;
+	a->gates[a->gates_len].id = a->gates_len;
 	a->gates[a->gates_len].type = type;
+	a->gates[a->gates_len].polarity = polarity;
 	return &a->gates[a->gates_len++];
 }
 
@@ -191,16 +228,13 @@ void
 drawcable(uint32_t* dst, Cable* c, int color)
 {
 	int i, d;
-	printf("Draw cable: %d\n", c->id);
 	for(i = 0; i < c->len - 1; i++) {
 		Point2d p1 = c->points[i];
 		Point2d* p2 = &c->points[i + 1];
 		if(p2) {
 			line(dst, p1.x, p1.y, p2->x, p2->y, color);
-			/*
-			if(c->a && (distance(c->a->x, c->a->y, p1.x, p1.y) < 200 || (arena.frame / 2) % c->len != i))
-				line(dst, p1.x, p1.y, p2->x, p2->y, c->a->polarity ? color0 : color4);
-			*/
+			if((arena.frame / 3) % c->len != i)
+				line(dst, p1.x, p1.y, p2->x, p2->y, c->polarity == 1 ? color4 : !c->polarity ? color0 : color3);
 		}
 	}
 }
@@ -208,22 +242,18 @@ drawcable(uint32_t* dst, Cable* c, int color)
 void
 drawgate(uint32_t* dst, Gate* g)
 {
-	int r = 2;
-	if(g->type == 0) {
-		line(dst, g->x - r, g->y, g->x, g->y - r, color2);
-		line(dst, g->x, g->y - r, g->x + r, g->y, color2);
-		line(dst, g->x + r, g->y, g->x, g->y + r, color2);
-		line(dst, g->x, g->y + r, g->x - r, g->y, color2);
-		pixel(dst, g->x, g->y, g->polarity ? color0 : color4);
-		pixel(dst, g->x - 1, g->y, g->polarity ? color0 : color4);
-		pixel(dst, g->x, g->y - 1, g->polarity ? color0 : color4);
-		pixel(dst, g->x + 1, g->y, g->polarity ? color0 : color4);
-		pixel(dst, g->x, g->y + 1, g->polarity ? color0 : color4);
-	} else {
-		line(dst, g->x - r, g->y - r, g->x + r, g->y - r, color2);
-		line(dst, g->x + r, g->y - r, g->x + r, g->y + r, color2);
-		line(dst, g->x + r, g->y + r, g->x - r, g->y + r, color2);
-		line(dst, g->x - r, g->y + r, g->x - r, g->y - r, color2);
+	int r = 17, i;
+	for(i = 0; i < r * r; ++i) {
+		int x = i % r, y = i / r;
+		int dist = distance(g->x, g->y, g->x - r / 2 + x, g->y - r / 2 + y);
+		if(dist < r) {
+			if(g->polarity == 1)
+				pixel(dst, g->x - r / 2 + x, g->y - r / 2 + y, color4);
+			else if(g->polarity == 0)
+				pixel(dst, g->x - r / 2 + x, g->y - r / 2 + y, color0);
+			else
+				pixel(dst, g->x - r / 2 + x, g->y - r / 2 + y, color3);
+		}
 	}
 }
 
@@ -241,7 +271,6 @@ redraw(uint32_t* dst, Brush* b)
 {
 	int i;
 	clear();
-	printf("------\n");
 	for(i = 0; i < arena.cables_len; i++)
 		drawcable(dst, &arena.cables[i], color2);
 	drawcable(dst, &b->cable, color3);
@@ -256,7 +285,8 @@ redraw(uint32_t* dst, Brush* b)
 void
 run(uint32_t* dst, Brush* b)
 {
-	/*
+	int i;
+
 	arena.inputs[0]->polarity = arena.frame % 2;
 	arena.inputs[1]->polarity = (arena.frame / 2) % 2;
 	arena.inputs[2]->polarity = (arena.frame / 4) % 2;
@@ -265,10 +295,10 @@ run(uint32_t* dst, Brush* b)
 	arena.inputs[5]->polarity = (arena.frame / 32) % 2;
 	arena.inputs[6]->polarity = (arena.frame / 64) % 2;
 	arena.inputs[7]->polarity = (arena.frame / 128) % 2;
+	for(i = 0; i < arena.gates_len; ++i)
+		bang(&arena.gates[i]);
 
 	redraw(dst, b);
-	*/
-
 	arena.frame++;
 }
 
@@ -276,14 +306,8 @@ void
 setup(void)
 {
 	int i;
-	Gate *on, *off;
-	/*
 	for(i = 0; i < 8; ++i)
-		arena.inputs[i] = addgate(&arena, 0, 10, 20 + i * 10);
-	*/
-	on = addgate(&arena, 0, 20, 20);
-	off = addgate(&arena, 0, 20, 40);
-	on->polarity = 1;
+		arena.inputs[i] = addgate(&arena, 0, 0, (i / 4) * 9 + 20, 20 + i * 10 - (i / 4) * 35);
 }
 
 /* options */
@@ -336,7 +360,7 @@ domouse(SDL_Event* event, Brush* b)
 		b->x = (event->motion.x - (PAD * ZOOM)) / ZOOM;
 		b->y = (event->motion.y - (PAD * ZOOM)) / ZOOM;
 		if(event->button.button == SDL_BUTTON_RIGHT) {
-			addgate(&arena, 1, b->x, b->y);
+			addgate(&arena, 1, -1, b->x, b->y);
 			redraw(pixels, b);
 			break;
 		}
@@ -359,6 +383,10 @@ dokey(SDL_Event* event, Brush* b)
 		break;
 	case SDLK_h:
 		GUIDES = !GUIDES;
+		break;
+	case SDLK_BACKSPACE:
+		arena.cables_len--;
+		redraw(pixels, b);
 		break;
 	case SDLK_1:
 		b->mode = 0;
