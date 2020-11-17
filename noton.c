@@ -166,6 +166,8 @@ terminate(Cable* c, Brush* b)
 		return abandon(c);
 	if(!gateto->type)
 		return abandon(c);
+	if(gatefrom == gateto)
+		return abandon(c);
 	b->x = gateto->x;
 	b->y = gateto->y;
 	append(c, b);
@@ -414,6 +416,7 @@ domouse(SDL_Event* event, Brush* b)
 void
 dokey(SDL_Event* event, Brush* b)
 {
+	/* int shift = SDL_GetModState() & KMOD_LSHIFT || SDL_GetModState() & KMOD_RSHIFT; */
 	switch(event->key.keysym.sym) {
 	case SDLK_ESCAPE:
 		quit();
@@ -422,7 +425,6 @@ dokey(SDL_Event* event, Brush* b)
 		GUIDES = !GUIDES;
 		break;
 	case SDLK_BACKSPACE:
-		arena.cables_len--;
 		redraw(pixels, b);
 		break;
 	}
