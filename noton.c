@@ -109,6 +109,8 @@ terminate(Cable* c, Brush* b)
 	if(!b->cable.a)
 		return;
 	b->cable.b = findgate(b->x, b->y);
+	if(b->cable.a == b->cable.b)
+		b->cable.b = NULL;
 	if(!b->cable.b) {
 		b->cable.len = 0;
 		b->cable.a = NULL;
