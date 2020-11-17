@@ -17,15 +17,15 @@ typedef struct {
 	int x, y;
 } Point2d;
 
-typedef struct Gate {
-	int polarity, type, x, y;
-} Gate;
-
 typedef struct Cable {
 	Point2d points[256];
-	Gate *a, *b;
-	int id, len;
+	int id, a, b, len;
 } Cable;
+
+typedef struct Gate {
+	int polarity, type, id, x, y;
+	Cable *a, *b, *c;
+} Gate;
 
 typedef struct Arena {
 	Gate gates[64];
@@ -70,7 +70,7 @@ findgate(int x, int y)
 {
 	int i;
 	for(i = 0; i < arena.gates_len; ++i)
-		if(distance(x, y, arena.gates[i].x, arena.gates[i].y) < 20)
+		if(distance(x, y, arena.gates[i].x, arena.gates[i].y) < 50)
 			return &arena.gates[i];
 	return NULL;
 }
@@ -80,11 +80,6 @@ findgate(int x, int y)
 void
 append(Cable* c, Brush* b)
 {
-	if(!b->cable.a)
-		return;
-	b->cable.b = findgate(b->x, b->y);
-	if(b->cable.a == b->cable.b)
-		b->cable.b = NULL;
 	if(c->len == 0 || (c->len > 0 && distance(c->points[c->len - 1].x, c->points[c->len - 1].y, b->x, b->y) > 20)) {
 		c->points[c->len].x = b->x;
 		c->points[c->len].y = b->y;
@@ -95,44 +90,56 @@ append(Cable* c, Brush* b)
 void
 begin(Cable* c, Brush* b)
 {
-	b->cable.a = findgate(b->x, b->y);
-	if(!b->cable.a)
-		return;
-	b->x = b->cable.a->x;
-	b->y = b->cable.a->y;
+	Gate* gate = findgate(b->x, b->y);
+	b->x = gate ? gate->x : b->x;
+	b->y = gate ? gate->y : b->y;
 	c->len = 0;
 	append(c, b);
 }
 
-void
+int
+abandon(Cable* c)
+{
+	c->len = 0;
+	return 0;
+}
+
+int
 terminate(Cable* c, Brush* b)
 {
 	int i;
-	if(!b->cable.a)
-		return;
-	b->cable.b = findgate(b->x, b->y);
-	if(b->cable.a == b->cable.b)
-		b->cable.b = NULL;
-	if(!b->cable.b) {
-		b->cable.len = 0;
-		b->cable.a = NULL;
-		return;
-	}
-	b->x = b->cable.b->x;
-	b->y = b->cable.b->y;
+	Cable* newcable;
+	Gate *gatefrom, *gateto;
+	if(c->len < 1)
+		return abandon(c);
+	gatefrom = findgate(c->points[0].x, c->points[0].y);
+	if(!gatefrom)
+		return abandon(c);
+	gateto = findgate(b->x, b->y);
+	if(!gateto)
+		return abandon(c);
+	if(gateto->a && gateto->b)
+		return abandon(c);
+	b->x = gateto->x;
+	b->y = gateto->y;
 	append(c, b);
+	/* copy */
+	newcable = &arena.cables[arena.cables_len];
+	newcable->id = arena.cables_len;
 	for(i = 0; i < c->len; i++) {
 		Point2d* bp = &c->points[i];
-		Point2d* cp = &arena.cables[arena.cables_len].points[i];
+		Point2d* cp = &newcable->points[i];
 		cp->x = bp->x;
 		cp->y = bp->y;
-		arena.cables[arena.cables_len].len++;
+		newcable->len++;
 	}
-	arena.cables[arena.cables_len].a = c->a;
-	arena.cables[arena.cables_len].b = c->b;
-	arena.cables[arena.cables_len].id = arena.cables_len;
+	gatefrom->c = &arena.cables[arena.cables_len];
+	if(!gateto->a)
+		gateto->a = &arena.cables[arena.cables_len];
+	else
+		gateto->b = &arena.cables[arena.cables_len];
 	arena.cables_len++;
-	c->len = 0;
+	return abandon(c);
 }
 
 Gate*
@@ -184,13 +191,16 @@ void
 drawcable(uint32_t* dst, Cable* c, int color)
 {
 	int i, d;
+	printf("Draw cable: %d\n", c->id);
 	for(i = 0; i < c->len - 1; i++) {
 		Point2d p1 = c->points[i];
 		Point2d* p2 = &c->points[i + 1];
 		if(p2) {
 			line(dst, p1.x, p1.y, p2->x, p2->y, color);
+			/*
 			if(c->a && (distance(c->a->x, c->a->y, p1.x, p1.y) < 200 || (arena.frame / 2) % c->len != i))
 				line(dst, p1.x, p1.y, p2->x, p2->y, c->a->polarity ? color0 : color4);
+			*/
 		}
 	}
 }
@@ -198,7 +208,7 @@ drawcable(uint32_t* dst, Cable* c, int color)
 void
 drawgate(uint32_t* dst, Gate* g)
 {
-	int r = 3;
+	int r = 2;
 	if(g->type == 0) {
 		line(dst, g->x - r, g->y, g->x, g->y - r, color2);
 		line(dst, g->x, g->y - r, g->x + r, g->y, color2);
@@ -210,8 +220,10 @@ drawgate(uint32_t* dst, Gate* g)
 		pixel(dst, g->x + 1, g->y, g->polarity ? color0 : color4);
 		pixel(dst, g->x, g->y + 1, g->polarity ? color0 : color4);
 	} else {
-		line(dst, g->x + r, g->y, g->x - r, g->y, color2);
-		line(dst, g->x, g->y + r, g->x, g->y - r, color2);
+		line(dst, g->x - r, g->y - r, g->x + r, g->y - r, color2);
+		line(dst, g->x + r, g->y - r, g->x + r, g->y + r, color2);
+		line(dst, g->x + r, g->y + r, g->x - r, g->y + r, color2);
+		line(dst, g->x - r, g->y + r, g->x - r, g->y - r, color2);
 	}
 }
 
@@ -229,6 +241,7 @@ redraw(uint32_t* dst, Brush* b)
 {
 	int i;
 	clear();
+	printf("------\n");
 	for(i = 0; i < arena.cables_len; i++)
 		drawcable(dst, &arena.cables[i], color2);
 	drawcable(dst, &b->cable, color3);
@@ -243,6 +256,7 @@ redraw(uint32_t* dst, Brush* b)
 void
 run(uint32_t* dst, Brush* b)
 {
+	/*
 	arena.inputs[0]->polarity = arena.frame % 2;
 	arena.inputs[1]->polarity = (arena.frame / 2) % 2;
 	arena.inputs[2]->polarity = (arena.frame / 4) % 2;
@@ -253,6 +267,8 @@ run(uint32_t* dst, Brush* b)
 	arena.inputs[7]->polarity = (arena.frame / 128) % 2;
 
 	redraw(dst, b);
+	*/
+
 	arena.frame++;
 }
 
@@ -261,10 +277,12 @@ setup(void)
 {
 	int i;
 	Gate *on, *off;
+	/*
 	for(i = 0; i < 8; ++i)
 		arena.inputs[i] = addgate(&arena, 0, 10, 20 + i * 10);
-	on = addgate(&arena, 0, 80, 20);
-	off = addgate(&arena, 0, 90, 20);
+	*/
+	on = addgate(&arena, 0, 20, 20);
+	off = addgate(&arena, 0, 20, 40);
 	on->polarity = 1;
 }
 
@@ -296,13 +314,17 @@ domouse(SDL_Event* event, Brush* b)
 {
 	switch(event->type) {
 	case SDL_MOUSEBUTTONDOWN:
-		b->down = 1;
 		b->x = (event->motion.x - (PAD * ZOOM)) / ZOOM;
 		b->y = (event->motion.y - (PAD * ZOOM)) / ZOOM;
+		if(event->button.button == SDL_BUTTON_RIGHT)
+			break;
+		b->down = 1;
 		begin(&b->cable, b);
 		redraw(pixels, b);
 		break;
 	case SDL_MOUSEMOTION:
+		if(event->button.button == SDL_BUTTON_RIGHT)
+			break;
 		if(b->down) {
 			b->x = (event->motion.x - (PAD * ZOOM)) / ZOOM;
 			b->y = (event->motion.y - (PAD * ZOOM)) / ZOOM;
@@ -311,9 +333,14 @@ domouse(SDL_Event* event, Brush* b)
 		}
 		break;
 	case SDL_MOUSEBUTTONUP:
-		b->down = 0;
 		b->x = (event->motion.x - (PAD * ZOOM)) / ZOOM;
 		b->y = (event->motion.y - (PAD * ZOOM)) / ZOOM;
+		if(event->button.button == SDL_BUTTON_RIGHT) {
+			addgate(&arena, 1, b->x, b->y);
+			redraw(pixels, b);
+			break;
+		}
+		b->down = 0;
 		terminate(&b->cable, b);
 		redraw(pixels, b);
 		break;
@@ -393,10 +420,6 @@ main(int argc, char** argv)
 	brush.mode = 0;
 
 	setup();
-
-	addgate(&arena, 1, 40, 40);
-	addgate(&arena, 1, 140, 70);
-	addgate(&arena, 1, 100, 120);
 
 	if(!init())
 		return error("Init", "Failure");
