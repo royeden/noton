@@ -8,8 +8,8 @@
 #define color1 0xeeeeee
 #define color2 0x000000
 #define color3 0xcccccc
-#define color4 0x444444
-#define color0 0x111111
+#define color4 0x72dec2
+#define color0 0xffb545
 
 #define SZ (HOR * VER * 16)
 
@@ -17,10 +17,22 @@ typedef struct {
 	int x, y;
 } Point2d;
 
+typedef struct Gate {
+	int type, x, y;
+} Gate;
+
 typedef struct Cable {
 	Point2d points[256];
+	Gate *a, *b;
 	int len;
 } Cable;
+
+typedef struct Arena {
+	Gate gates[64];
+	int gates_len;
+	Cable cables[64];
+	int cables_len;
+} Arena;
 
 typedef struct Brush {
 	int x, y;
@@ -41,8 +53,7 @@ SDL_Window* gWindow = NULL;
 SDL_Renderer* gRenderer = NULL;
 SDL_Texture* gTexture = NULL;
 uint32_t* pixels;
-Cable cables[64];
-int cables_len;
+Arena arena;
 
 /* helpers */
 
@@ -52,38 +63,79 @@ distance(int ax, int ay, int bx, int by)
 	return (bx - ax) * (bx - ax) + (by - ay) * (by - ay);
 }
 
+Gate*
+findgate(int x, int y)
+{
+	int i;
+	for(i = 0; i < arena.gates_len; ++i)
+		if(distance(x, y, arena.gates[i].x, arena.gates[i].y) < 20)
+			return &arena.gates[i];
+	return NULL;
+}
+
 /* Cabling */
 
 void
-append(Cable* c, int x, int y)
+append(Cable* c, Brush* b)
 {
-	c->points[c->len].x = x;
-	c->points[c->len].y = y;
-	c->len++;
+	if(!b->cable.a)
+		return;
+	b->cable.b = findgate(b->x, b->y);
+	if(b->cable.a == b->cable.b)
+		b->cable.b = NULL;
+	if(c->len == 0 || (c->len > 0 && distance(c->points[c->len - 1].x, c->points[c->len - 1].y, b->x, b->y) > 10)) {
+		c->points[c->len].x = b->x;
+		c->points[c->len].y = b->y;
+		c->len++;
+	}
 }
 
 void
-begin(Cable* c, int x, int y)
+begin(Cable* c, Brush* b)
 {
+	b->cable.a = findgate(b->x, b->y);
+	if(!b->cable.a)
+		return;
+	b->x = b->cable.a->x;
+	b->y = b->cable.a->y;
 	c->len = 0;
-	append(c, x, y);
+	append(c, b);
 }
 
 void
-terminate(Cable* c, int x, int y)
+terminate(Cable* c, Brush* b)
 {
-	/* move cable to cables */
 	int i;
-	append(c, x, y);
+	if(!b->cable.a)
+		return;
+	b->cable.b = findgate(b->x, b->y);
+	if(!b->cable.b) {
+		b->cable.len = 0;
+		b->cable.a = NULL;
+		return;
+	}
+	b->x = b->cable.b->x;
+	b->y = b->cable.b->y;
+	append(c, b);
 	for(i = 0; i < c->len; i++) {
 		Point2d* bp = &c->points[i];
-		Point2d* cp = &cables[cables_len].points[i];
+		Point2d* cp = &arena.cables[arena.cables_len].points[i];
 		cp->x = bp->x;
 		cp->y = bp->y;
-		cables[cables_len].len++;
+		arena.cables[arena.cables_len].len++;
 	}
-	cables_len++;
+	arena.cables[arena.cables_len].a = c->a;
+	arena.cables[arena.cables_len].b = c->b;
+	arena.cables_len++;
 	c->len = 0;
+}
+
+void
+addgate(Arena* a, int x, int y)
+{
+	a->gates[a->gates_len].x = x;
+	a->gates[a->gates_len].y = y;
+	a->gates_len++;
 }
 
 /* draw */
@@ -117,16 +169,6 @@ line(uint32_t* dst, int ax, int ay, int bx, int by, int color)
 }
 
 void
-draw(uint32_t* dst)
-{
-
-	SDL_UpdateTexture(gTexture, NULL, dst, WIDTH * sizeof(uint32_t));
-	SDL_RenderClear(gRenderer);
-	SDL_RenderCopy(gRenderer, gTexture, NULL, NULL);
-	SDL_RenderPresent(gRenderer);
-}
-
-void
 update(void)
 {
 	SDL_SetWindowTitle(gWindow, "Noton");
@@ -135,22 +177,41 @@ update(void)
 void
 drawcable(uint32_t* dst, Cable* c, int color)
 {
-	int i;
+	int i, d;
 	for(i = 0; i < c->len - 1; i++) {
 		Point2d p1 = c->points[i];
 		Point2d* p2 = &c->points[i + 1];
-		if(p2)
+		if(p2) {
 			line(dst, p1.x, p1.y, p2->x, p2->y, color);
+			if(c->a)
+				if(distance(c->a->x, c->a->y, p1.x, p1.y) < 200)
+					line(dst, p1.x, p1.y, p2->x, p2->y, color4);
+			if(c->b)
+				if(distance(c->b->x, c->b->y, p2->x, p2->y) < 200)
+					line(dst, p1.x, p1.y, p2->x, p2->y, color0);
+		}
 	}
+}
+
+void
+drawgate(uint32_t* dst, Gate* g)
+{
+	int r = 2;
+	line(dst, g->x - r, g->y, g->x, g->y - r, color2);
+	line(dst, g->x, g->y - r, g->x + r, g->y, color2);
+	line(dst, g->x + r, g->y, g->x, g->y + r, color2);
+	line(dst, g->x, g->y + r, g->x - r, g->y, color2);
 }
 
 void
 redraw(uint32_t* dst, Brush* b)
 {
 	int i;
-	for(i = 0; i < cables_len; i++) 
-		drawcable(dst, &cables[i], color2);
+	for(i = 0; i < arena.cables_len; i++)
+		drawcable(dst, &arena.cables[i], color2);
 	drawcable(dst, &b->cable, color3);
+	for(i = 0; i < arena.gates_len; i++)
+		drawgate(dst, &arena.gates[i]);
 
 	SDL_UpdateTexture(gTexture, NULL, dst, WIDTH * sizeof(uint32_t));
 	SDL_RenderClear(gRenderer);
@@ -182,6 +243,15 @@ quit(void)
 }
 
 void
+clear(void)
+{
+	int i, j;
+	for(i = 0; i < HEIGHT; i++)
+		for(j = 0; j < WIDTH; j++)
+			pixels[i * WIDTH + j] = color1;
+}
+
+void
 domouse(SDL_Event* event, Brush* b)
 {
 	switch(event->type) {
@@ -189,14 +259,14 @@ domouse(SDL_Event* event, Brush* b)
 		b->down = 1;
 		b->x = (event->motion.x - (PAD * ZOOM)) / ZOOM;
 		b->y = (event->motion.y - (PAD * ZOOM)) / ZOOM;
-		begin(&b->cable, b->x, b->y);
+		begin(&b->cable, b);
 		redraw(pixels, b);
 		break;
 	case SDL_MOUSEMOTION:
 		if(b->down) {
 			b->x = (event->motion.x - (PAD * ZOOM)) / ZOOM;
 			b->y = (event->motion.y - (PAD * ZOOM)) / ZOOM;
-			append(&b->cable, b->x, b->y);
+			append(&b->cable, b);
 			redraw(pixels, b);
 		}
 		break;
@@ -204,7 +274,8 @@ domouse(SDL_Event* event, Brush* b)
 		b->down = 0;
 		b->x = (event->motion.x - (PAD * ZOOM)) / ZOOM;
 		b->y = (event->motion.y - (PAD * ZOOM)) / ZOOM;
-		terminate(&b->cable, b->x, b->y);
+		terminate(&b->cable, b);
+		clear();
 		redraw(pixels, b);
 		break;
 	}
@@ -242,7 +313,6 @@ dokey(SDL_Event* event, Brush* b)
 int
 init(void)
 {
-	int i, j;
 	if(SDL_Init(SDL_INIT_VIDEO) < 0)
 		return error("Init", SDL_GetError());
 	gWindow = SDL_CreateWindow("Noton",
@@ -266,9 +336,7 @@ init(void)
 	pixels = (uint32_t*)malloc(WIDTH * HEIGHT * sizeof(uint32_t));
 	if(pixels == NULL)
 		return error("Pixels", "Failed to allocate memory");
-	for(i = 0; i < HEIGHT; i++)
-		for(j = 0; j < WIDTH; j++)
-			pixels[i * WIDTH + j] = color1;
+	clear();
 	return 1;
 }
 
@@ -276,6 +344,7 @@ int
 main(int argc, char** argv)
 {
 	int ticknext = 0;
+
 	Brush brush;
 	brush.down = 0;
 	brush.color = 1;
@@ -283,10 +352,13 @@ main(int argc, char** argv)
 	brush.size = 10;
 	brush.mode = 0;
 
+	addgate(&arena, 40, 40);
+	addgate(&arena, 140, 70);
+	addgate(&arena, 100, 120);
+
 	if(!init())
 		return error("Init", "Failure");
 
-	draw(pixels);
 	update();
 
 	while(1) {
@@ -306,7 +378,7 @@ main(int argc, char** argv)
 				dokey(&event, &brush);
 			else if(event.type == SDL_WINDOWEVENT)
 				if(event.window.event == SDL_WINDOWEVENT_EXPOSED)
-					draw(pixels);
+					redraw(pixels, &brush);
 		}
 	}
 	quit();
