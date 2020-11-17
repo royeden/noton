@@ -14,15 +14,9 @@ sudo apt-get install libsdl2-dev
 
 ### General
 
-- `BACKTICK` Cleanup Brush
-- `1-7` Patterns
-- `TAB` Cycle between colors
-- `H` Toggle Guides
-- `Z` Decr. Brush Size
-- `X` Incr. Brush Size
-- `N` Clear
+- `BACKSPACE` Erase last stroke
 
 ### Paint
 
-- `mouse1` Paint
-- `mouse1+mouse2` Erase
+- `mouse1` Stroke
+- `mouse1+mouse2` Gate

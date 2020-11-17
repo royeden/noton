@@ -40,12 +40,7 @@ typedef struct Arena {
 
 typedef struct Brush {
 	int x, y;
-	int mode;
-	int size;
-	int color;
 	int down;
-	int edit;
-	int erase;
 	Cable cable;
 } Brush;
 
@@ -153,6 +148,8 @@ terminate(Cable* c, Brush* b)
 		return abandon(c);
 	if(gateto->a && gateto->b)
 		return abandon(c);
+	if(!gateto->type)
+		return abandon(c);
 	b->x = gateto->x;
 	b->y = gateto->y;
 	append(c, b);
@@ -227,7 +224,7 @@ update(void)
 void
 drawcable(uint32_t* dst, Cable* c, int color)
 {
-	int i, d;
+	int i;
 	for(i = 0; i < c->len - 1; i++) {
 		Point2d p1 = c->points[i];
 		Point2d* p2 = &c->points[i + 1];
@@ -378,27 +375,12 @@ dokey(SDL_Event* event, Brush* b)
 	case SDLK_ESCAPE:
 		quit();
 		break;
-	case SDLK_TAB:
-		b->color = b->color > 2 ? 0 : b->color + 1;
-		break;
 	case SDLK_h:
 		GUIDES = !GUIDES;
 		break;
 	case SDLK_BACKSPACE:
 		arena.cables_len--;
 		redraw(pixels, b);
-		break;
-	case SDLK_1:
-		b->mode = 0;
-		break;
-	case SDLK_2:
-		b->mode = 1;
-		break;
-	case SDLK_3:
-		b->mode = 2;
-		break;
-	case SDLK_4:
-		b->mode = 3;
 		break;
 	}
 	update();
@@ -442,10 +424,6 @@ main(int argc, char** argv)
 
 	Brush brush;
 	brush.down = 0;
-	brush.color = 1;
-	brush.edit = 0;
-	brush.size = 10;
-	brush.mode = 0;
 
 	setup();
 
