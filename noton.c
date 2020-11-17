@@ -11,17 +11,10 @@
 #define color4 0x72dec2
 #define color0 0xffb545
 
-#define SZ (HOR * VER * 16)
-
 typedef enum {
 	INPUT,
 	OUTPUT,
-	AND,
-	NAND,
-	OR,
-	NOR,
-	XOR,
-	XNOR
+	NOR
 } GateType;
 
 typedef struct {
@@ -80,6 +73,12 @@ findgate(int x, int y)
 	return NULL;
 }
 
+Gate*
+findgateid(Arena* a, int id)
+{
+	return &a->gates[id];
+}
+
 void
 polarize(Gate* g)
 {
@@ -89,7 +88,7 @@ polarize(Gate* g)
 	else if(!g->a || !g->b || (g->a && g->a->polarity < 0) || (g->b && g->b->polarity < 0))
 		g->polarity = -1;
 	else
-		g->polarity = !!g->a->polarity ^ !!g->b->polarity;
+		g->polarity = !!g->a->polarity == !!g->b->polarity;
 
 	for(i = 0; i < g->len; ++i) {
 		g->outputs[i]->polarity = g->polarity;
@@ -97,9 +96,16 @@ polarize(Gate* g)
 }
 
 void
-bang(Gate* g)
+bang(Gate* g, int depth)
 {
+	int i, a = depth - 1;
+	if(a < 1 || !g)
+		return;
 	polarize(g);
+	for(i = 0; i < g->len; ++i) {
+		Gate* next = findgateid(&arena, g->outputs[i]->b);
+		bang(next, a);
+	}
 }
 
 int
@@ -164,6 +170,8 @@ terminate(Cable* c, Brush* b)
 	/* copy */
 	newcable = &arena.cables[arena.cables_len];
 	newcable->id = arena.cables_len;
+	newcable->a = gatefrom->id;
+	newcable->b = gateto->id;
 	for(i = 0; i < c->len; i++) {
 		Point2d* bp = &c->points[i];
 		Point2d* cp = &newcable->points[i];
@@ -198,7 +206,9 @@ addgate(Arena* a, GateType type, int polarity, int x, int y)
 void
 pixel(uint32_t* dst, int x, int y, int color)
 {
-	dst[(y + PAD) * WIDTH + (x + PAD)] = color;
+	int key = (y + PAD) * WIDTH + (x + PAD);
+	if(key >= 0 && key < HEIGHT * WIDTH)
+		dst[key] = color;
 }
 
 void
@@ -271,7 +281,7 @@ void
 drawgate(uint32_t* dst, Gate* g)
 {
 	int r = 17, i, clr = g->polarity == 1 ? color4 : g->polarity == 0 ? color0 : color3;
-	if(g->type == AND) {
+	if(g->type == NOR) {
 		circle(dst, g->x, g->y, 2, g->polarity == 1 ? color0 : g->polarity == 0 ? color4 : color3);
 		circle(dst, g->x, g->y, 4, g->polarity == 1 ? color4 : g->polarity == 0 ? color0 : color3);
 		return;
@@ -322,7 +332,7 @@ run(uint32_t* dst, Brush* b)
 	arena.inputs[6]->polarity = (arena.frame / 64) % 2;
 	arena.inputs[7]->polarity = (arena.frame / 128) % 2;
 	for(i = 0; i < arena.gates_len; ++i)
-		bang(&arena.gates[i]);
+		bang(&arena.gates[i], 10);
 	redraw(dst, b);
 	arena.frame++;
 }
@@ -331,9 +341,13 @@ void
 setup(void)
 {
 	int i;
-	for(i = 0; i < 8; ++i)
-		arena.inputs[i] = addgate(&arena, 0, 0, (i / 4) * 9 + 20, 20 + i * 10 - (i / 4) * 35);
-	addgate(&arena, AND, 0, 100, 100);
+	for(i = 0; i < 8; ++i) {
+		int x = i < 4 ? 20 : 28;
+		int y = i < 4 ? 20 + i * 10 : 35 + (i - 5) * 10;
+		arena.inputs[i] = addgate(&arena, 0, 0, x, y);
+	}
+	addgate(&arena, INPUT, 0, 20, 70);
+	addgate(&arena, INPUT, 1, 28, 75);
 }
 
 /* options */
