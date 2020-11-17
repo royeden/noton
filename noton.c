@@ -9,7 +9,7 @@
 #define color2 0x000000
 #define color3 0xcccccc
 #define color4 0x72dec2
-#define color0 0xffb545
+#define color0 0xff0000 /* 0xffb545 */
 
 #define SZ (HOR * VER * 16)
 
@@ -18,13 +18,13 @@ typedef struct {
 } Point2d;
 
 typedef struct Gate {
-	int type, x, y;
+	int polarity, type, x, y;
 } Gate;
 
 typedef struct Cable {
 	Point2d points[256];
 	Gate *a, *b;
-	int len;
+	int id, len;
 } Cable;
 
 typedef struct Arena {
@@ -32,6 +32,8 @@ typedef struct Arena {
 	int gates_len;
 	Cable cables[64];
 	int cables_len;
+	Gate* inputs[8];
+	int frame;
 } Arena;
 
 typedef struct Brush {
@@ -83,7 +85,7 @@ append(Cable* c, Brush* b)
 	b->cable.b = findgate(b->x, b->y);
 	if(b->cable.a == b->cable.b)
 		b->cable.b = NULL;
-	if(c->len == 0 || (c->len > 0 && distance(c->points[c->len - 1].x, c->points[c->len - 1].y, b->x, b->y) > 10)) {
+	if(c->len == 0 || (c->len > 0 && distance(c->points[c->len - 1].x, c->points[c->len - 1].y, b->x, b->y) > 20)) {
 		c->points[c->len].x = b->x;
 		c->points[c->len].y = b->y;
 		c->len++;
@@ -128,16 +130,18 @@ terminate(Cable* c, Brush* b)
 	}
 	arena.cables[arena.cables_len].a = c->a;
 	arena.cables[arena.cables_len].b = c->b;
+	arena.cables[arena.cables_len].id = arena.cables_len;
 	arena.cables_len++;
 	c->len = 0;
 }
 
-void
-addgate(Arena* a, int x, int y)
+Gate*
+addgate(Arena* a, int type, int x, int y)
 {
 	a->gates[a->gates_len].x = x;
 	a->gates[a->gates_len].y = y;
-	a->gates_len++;
+	a->gates[a->gates_len].type = type;
+	return &a->gates[a->gates_len++];
 }
 
 /* draw */
@@ -185,12 +189,8 @@ drawcable(uint32_t* dst, Cable* c, int color)
 		Point2d* p2 = &c->points[i + 1];
 		if(p2) {
 			line(dst, p1.x, p1.y, p2->x, p2->y, color);
-			if(c->a)
-				if(distance(c->a->x, c->a->y, p1.x, p1.y) < 200)
-					line(dst, p1.x, p1.y, p2->x, p2->y, color4);
-			if(c->b)
-				if(distance(c->b->x, c->b->y, p2->x, p2->y) < 200)
-					line(dst, p1.x, p1.y, p2->x, p2->y, color0);
+			if(c->a && (distance(c->a->x, c->a->y, p1.x, p1.y) < 200 || (arena.frame / 2) % c->len != i))
+				line(dst, p1.x, p1.y, p2->x, p2->y, c->a->polarity ? color0 : color4);
 		}
 	}
 }
@@ -198,27 +198,74 @@ drawcable(uint32_t* dst, Cable* c, int color)
 void
 drawgate(uint32_t* dst, Gate* g)
 {
-	int r = 2;
-	line(dst, g->x - r, g->y, g->x, g->y - r, color2);
-	line(dst, g->x, g->y - r, g->x + r, g->y, color2);
-	line(dst, g->x + r, g->y, g->x, g->y + r, color2);
-	line(dst, g->x, g->y + r, g->x - r, g->y, color2);
+	int r = 3;
+	if(g->type == 0) {
+		line(dst, g->x - r, g->y, g->x, g->y - r, color2);
+		line(dst, g->x, g->y - r, g->x + r, g->y, color2);
+		line(dst, g->x + r, g->y, g->x, g->y + r, color2);
+		line(dst, g->x, g->y + r, g->x - r, g->y, color2);
+		pixel(dst, g->x, g->y, g->polarity ? color0 : color4);
+		pixel(dst, g->x - 1, g->y, g->polarity ? color0 : color4);
+		pixel(dst, g->x, g->y - 1, g->polarity ? color0 : color4);
+		pixel(dst, g->x + 1, g->y, g->polarity ? color0 : color4);
+		pixel(dst, g->x, g->y + 1, g->polarity ? color0 : color4);
+	} else {
+		line(dst, g->x + r, g->y, g->x - r, g->y, color2);
+		line(dst, g->x, g->y + r, g->x, g->y - r, color2);
+	}
+}
+
+void
+clear(void)
+{
+	int i, j;
+	for(i = 0; i < HEIGHT; i++)
+		for(j = 0; j < WIDTH; j++)
+			pixels[i * WIDTH + j] = color1;
 }
 
 void
 redraw(uint32_t* dst, Brush* b)
 {
 	int i;
+	clear();
 	for(i = 0; i < arena.cables_len; i++)
 		drawcable(dst, &arena.cables[i], color2);
 	drawcable(dst, &b->cable, color3);
 	for(i = 0; i < arena.gates_len; i++)
 		drawgate(dst, &arena.gates[i]);
-
 	SDL_UpdateTexture(gTexture, NULL, dst, WIDTH * sizeof(uint32_t));
 	SDL_RenderClear(gRenderer);
 	SDL_RenderCopy(gRenderer, gTexture, NULL, NULL);
 	SDL_RenderPresent(gRenderer);
+}
+
+void
+run(uint32_t* dst, Brush* b)
+{
+	arena.inputs[0]->polarity = arena.frame % 2;
+	arena.inputs[1]->polarity = (arena.frame / 2) % 2;
+	arena.inputs[2]->polarity = (arena.frame / 4) % 2;
+	arena.inputs[3]->polarity = (arena.frame / 8) % 2;
+	arena.inputs[4]->polarity = (arena.frame / 16) % 2;
+	arena.inputs[5]->polarity = (arena.frame / 32) % 2;
+	arena.inputs[6]->polarity = (arena.frame / 64) % 2;
+	arena.inputs[7]->polarity = (arena.frame / 128) % 2;
+
+	redraw(dst, b);
+	arena.frame++;
+}
+
+void
+setup(void)
+{
+	int i;
+	Gate *on, *off;
+	for(i = 0; i < 8; ++i)
+		arena.inputs[i] = addgate(&arena, 0, 10, 20 + i * 10);
+	on = addgate(&arena, 0, 80, 20);
+	off = addgate(&arena, 0, 90, 20);
+	on->polarity = 1;
 }
 
 /* options */
@@ -245,15 +292,6 @@ quit(void)
 }
 
 void
-clear(void)
-{
-	int i, j;
-	for(i = 0; i < HEIGHT; i++)
-		for(j = 0; j < WIDTH; j++)
-			pixels[i * WIDTH + j] = color1;
-}
-
-void
 domouse(SDL_Event* event, Brush* b)
 {
 	switch(event->type) {
@@ -277,7 +315,6 @@ domouse(SDL_Event* event, Brush* b)
 		b->x = (event->motion.x - (PAD * ZOOM)) / ZOOM;
 		b->y = (event->motion.y - (PAD * ZOOM)) / ZOOM;
 		terminate(&b->cable, b);
-		clear();
 		redraw(pixels, b);
 		break;
 	}
@@ -346,6 +383,7 @@ int
 main(int argc, char** argv)
 {
 	int ticknext = 0;
+	int tickrun = 0;
 
 	Brush brush;
 	brush.down = 0;
@@ -354,9 +392,11 @@ main(int argc, char** argv)
 	brush.size = 10;
 	brush.mode = 0;
 
-	addgate(&arena, 40, 40);
-	addgate(&arena, 140, 70);
-	addgate(&arena, 100, 120);
+	setup();
+
+	addgate(&arena, 1, 40, 40);
+	addgate(&arena, 1, 140, 70);
+	addgate(&arena, 1, 100, 120);
 
 	if(!init())
 		return error("Init", "Failure");
@@ -368,7 +408,13 @@ main(int argc, char** argv)
 		SDL_Event event;
 		if(tick < ticknext)
 			SDL_Delay(ticknext - tick);
-		ticknext = tick + (1000 / FPS);
+
+		if(tickrun == 1024 * 16) {
+			run(pixels, &brush);
+			tickrun = 0;
+		}
+		tickrun++;
+
 		while(SDL_PollEvent(&event) != 0) {
 			if(event.type == SDL_QUIT)
 				quit();
