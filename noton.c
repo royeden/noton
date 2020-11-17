@@ -28,9 +28,9 @@ typedef struct Cable {
 } Cable;
 
 typedef struct Gate {
-	int polarity, id, x, y, outlen;
+	int polarity, id, x, y, inlen, outlen;
 	GateType type;
-	Cable *a, *b, *outputs[32];
+	Cable *inputs[32], *outputs[32];
 } Gate;
 
 typedef struct Arena {
@@ -80,16 +80,26 @@ findgateid(Arena* a, int id)
 	return &a->gates[id];
 }
 
+int
+getpolarity(Gate* g)
+{
+	int i, polarity = -1;
+	if(g->inlen < 1)
+		return -1;
+	if(g->inlen == 1)
+		return g->inputs[0]->polarity;
+	for(i = 0; i < g->inlen; i++)
+		if(g->inputs[i]->polarity != g->inputs[0]->polarity)
+			return 0;
+	return 1;
+}
+
 void
 polarize(Gate* g)
 {
 	int i;
-	if(!g->type)
-		;
-	else if(!g->a || !g->b || (g->a && g->a->polarity < 0) || (g->b && g->b->polarity < 0))
-		g->polarity = -1;
-	else
-		g->polarity = !!g->a->polarity == !!g->b->polarity;
+	if(g->type)
+		g->polarity = getpolarity(g);
 	/* update outputs */
 	for(i = 0; i < g->outlen; ++i)
 		g->outputs[i]->polarity = g->polarity;
@@ -106,12 +116,6 @@ bang(Gate* g, int depth)
 		Gate* next = findgateid(&arena, g->outputs[i]->b);
 		bang(next, a);
 	}
-}
-
-int
-polaritycolor(int polarity)
-{
-	return polarity == 1 ? color4 : polarity == 0 ? color4 : color3;
 }
 
 /* Cabling */
@@ -160,8 +164,6 @@ terminate(Cable* c, Brush* b)
 	gateto = findgate(b->x, b->y);
 	if(!gateto)
 		return abandon(c);
-	if(gateto->a && gateto->b)
-		return abandon(c);
 	if(!gateto->type)
 		return abandon(c);
 	b->x = gateto->x;
@@ -181,10 +183,7 @@ terminate(Cable* c, Brush* b)
 	}
 	/* connect */
 	gatefrom->outputs[gatefrom->outlen++] = newcable;
-	if(!gateto->a)
-		gateto->a = newcable;
-	else
-		gateto->b = newcable;
+	gateto->inputs[gateto->inlen++] = newcable;
 	polarize(gateto);
 	arena.cables_len++;
 	return abandon(c);
@@ -363,6 +362,7 @@ void
 quit(void)
 {
 	free(pixels);
+	Pm_Terminate();
 	SDL_DestroyTexture(gTexture);
 	gTexture = NULL;
 	SDL_DestroyRenderer(gRenderer);
@@ -429,11 +429,22 @@ dokey(SDL_Event* event, Brush* b)
 	update();
 }
 
+void
+print_devices(void)
+{
+	int i, num = Pm_CountDevices();
+	for(i = 0; i < num; ++i) {
+		PmDeviceInfo const* info = Pm_GetDeviceInfo(i);
+		puts(info->name);
+	}
+}
+
 int
 init(void)
 {
 	if(SDL_Init(SDL_INIT_VIDEO) < 0)
 		return error("Init", SDL_GetError());
+	printf("init\n");
 	gWindow = SDL_CreateWindow("Noton",
 	                           SDL_WINDOWPOS_UNDEFINED,
 	                           SDL_WINDOWPOS_UNDEFINED,
@@ -456,6 +467,10 @@ init(void)
 	if(pixels == NULL)
 		return error("Pixels", "Failed to allocate memory");
 	clear();
+	Pm_Initialize();
+
+	print_devices();
+
 	return 1;
 }
 
