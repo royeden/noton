@@ -13,6 +13,17 @@
 
 #define SZ (HOR * VER * 16)
 
+typedef enum {
+	INPUT,
+	OUTPUT,
+	AND,
+	NAND,
+	OR,
+	NOR,
+	XOR,
+	XNOR
+} GateType;
+
 typedef struct {
 	int x, y;
 } Point2d;
@@ -23,19 +34,16 @@ typedef struct Cable {
 } Cable;
 
 typedef struct Gate {
-	int polarity, type, id, x, y;
-	Cable *a, *b;
-	Cable* outputs[32];
-	int outputs_len;
+	int polarity, id, x, y, len;
+	GateType type;
+	Cable *a, *b, *outputs[32];
 } Gate;
 
 typedef struct Arena {
 	Gate gates[64];
-	int gates_len;
+	int gates_len, cables_len, frame;
 	Cable cables[64];
-	int cables_len;
 	Gate* inputs[8];
-	int frame;
 } Arena;
 
 typedef struct Brush {
@@ -83,7 +91,7 @@ polarize(Gate* g)
 	else
 		g->polarity = !!g->a->polarity ^ !!g->b->polarity;
 
-	for(i = 0; i < g->outputs_len; ++i) {
+	for(i = 0; i < g->len; ++i) {
 		g->outputs[i]->polarity = g->polarity;
 	}
 }
@@ -164,7 +172,7 @@ terminate(Cable* c, Brush* b)
 		newcable->len++;
 	}
 	/* connect */
-	gatefrom->outputs[gatefrom->outputs_len++] = newcable;
+	gatefrom->outputs[gatefrom->len++] = newcable;
 	if(!gateto->a)
 		gateto->a = newcable;
 	else
@@ -175,7 +183,7 @@ terminate(Cable* c, Brush* b)
 }
 
 Gate*
-addgate(Arena* a, int type, int polarity, int x, int y)
+addgate(Arena* a, GateType type, int polarity, int x, int y)
 {
 	a->gates[a->gates_len].x = x;
 	a->gates[a->gates_len].y = y;
@@ -216,6 +224,29 @@ line(uint32_t* dst, int ax, int ay, int bx, int by, int color)
 }
 
 void
+circle(uint32_t* dst, int xc, int yc, int r, int color)
+{
+	int x = 0, y = r, p = 3 - 2 * r;
+	do {
+		pixel(dst, xc + x, yc + y, color);
+		pixel(dst, xc - x, yc - y, color);
+		pixel(dst, xc - x, yc + y, color);
+		pixel(dst, xc + x, yc - y, color);
+		pixel(dst, xc + y, yc + x, color);
+		pixel(dst, xc + y, yc - x, color);
+		pixel(dst, xc - y, yc - x, color);
+		pixel(dst, xc - y, yc + x, color);
+		x++;
+		if(p < 0)
+			p = p + 4 * x + 6;
+		else {
+			y--;
+			p = p + 4 * (x - y) + 10;
+		}
+	} while(x <= y);
+}
+
+void
 update(void)
 {
 	SDL_SetWindowTitle(gWindow, "Noton");
@@ -239,18 +270,17 @@ drawcable(uint32_t* dst, Cable* c, int color)
 void
 drawgate(uint32_t* dst, Gate* g)
 {
-	int r = 17, i;
+	int r = 17, i, clr = g->polarity == 1 ? color4 : g->polarity == 0 ? color0 : color3;
+	if(g->type == AND) {
+		circle(dst, g->x, g->y, 2, g->polarity == 1 ? color0 : g->polarity == 0 ? color4 : color3);
+		circle(dst, g->x, g->y, 4, g->polarity == 1 ? color4 : g->polarity == 0 ? color0 : color3);
+		return;
+	}
 	for(i = 0; i < r * r; ++i) {
 		int x = i % r, y = i / r;
 		int dist = distance(g->x, g->y, g->x - r / 2 + x, g->y - r / 2 + y);
-		if(dist < r) {
-			if(g->polarity == 1)
-				pixel(dst, g->x - r / 2 + x, g->y - r / 2 + y, color4);
-			else if(g->polarity == 0)
-				pixel(dst, g->x - r / 2 + x, g->y - r / 2 + y, color0);
-			else
-				pixel(dst, g->x - r / 2 + x, g->y - r / 2 + y, color3);
-		}
+		if(dist < r)
+			pixel(dst, g->x - r / 2 + x, g->y - r / 2 + y, clr);
 	}
 }
 
@@ -283,7 +313,6 @@ void
 run(uint32_t* dst, Brush* b)
 {
 	int i;
-
 	arena.inputs[0]->polarity = arena.frame % 2;
 	arena.inputs[1]->polarity = (arena.frame / 2) % 2;
 	arena.inputs[2]->polarity = (arena.frame / 4) % 2;
@@ -294,7 +323,6 @@ run(uint32_t* dst, Brush* b)
 	arena.inputs[7]->polarity = (arena.frame / 128) % 2;
 	for(i = 0; i < arena.gates_len; ++i)
 		bang(&arena.gates[i]);
-
 	redraw(dst, b);
 	arena.frame++;
 }
@@ -305,6 +333,7 @@ setup(void)
 	int i;
 	for(i = 0; i < 8; ++i)
 		arena.inputs[i] = addgate(&arena, 0, 0, (i / 4) * 9 + 20, 20 + i * 10 - (i / 4) * 35);
+	addgate(&arena, AND, 0, 100, 100);
 }
 
 /* options */

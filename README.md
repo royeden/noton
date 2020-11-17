@@ -1,6 +1,6 @@
 # Noton
 
-A minimal chr editor, written in ANSI C.
+A minimal logic gates playground, written in ANSI C.
 
 ## Build
 
