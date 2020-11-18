@@ -28,7 +28,7 @@ typedef struct Cable {
 } Cable;
 
 typedef struct Gate {
-	int polarity, id, x, y, inlen, outlen;
+	int polarity, id, x, y, inlen, outlen, value;
 	GateType type;
 	Cable *inputs[32], *outputs[32];
 } Gate;
@@ -37,7 +37,7 @@ typedef struct Arena {
 	Gate gates[64];
 	int gates_len, cables_len, frame;
 	Cable cables[64];
-	Gate* inputs[8];
+	Gate *inputs[8], *outputs[36];
 } Arena;
 
 typedef struct Brush {
@@ -83,7 +83,7 @@ findgateid(Arena* a, int id)
 int
 getpolarity(Gate* g)
 {
-	int i, polarity = -1;
+	int i;
 	if(g->inlen < 1)
 		return -1;
 	if(g->inlen == 1)
@@ -95,12 +95,22 @@ getpolarity(Gate* g)
 }
 
 void
+playnote(int value, int z)
+{
+	printf("play: %d -> %d\n", value, z);
+}
+
+void
 polarize(Gate* g)
 {
 	int i;
-	if(g->type)
+	if(g->type == OUTPUT) {
+		int newpolarity = getpolarity(g);
+		if(g->polarity != newpolarity)
+			playnote(g->value, newpolarity);
+		g->polarity = newpolarity;
+	} else if(g->type)
 		g->polarity = getpolarity(g);
-	/* update outputs */
 	for(i = 0; i < g->outlen; ++i)
 		g->outputs[i]->polarity = g->polarity;
 }
@@ -235,26 +245,15 @@ line(uint32_t* dst, int ax, int ay, int bx, int by, int color)
 }
 
 void
-circle(uint32_t* dst, int xc, int yc, int r, int color)
+circle(uint32_t* dst, int ax, int ay, int r, int color)
 {
-	int x = 0, y = r, p = 3 - 2 * r;
-	do {
-		pixel(dst, xc + x, yc + y, color);
-		pixel(dst, xc - x, yc - y, color);
-		pixel(dst, xc - x, yc + y, color);
-		pixel(dst, xc + x, yc - y, color);
-		pixel(dst, xc + y, yc + x, color);
-		pixel(dst, xc + y, yc - x, color);
-		pixel(dst, xc - y, yc - x, color);
-		pixel(dst, xc - y, yc + x, color);
-		x++;
-		if(p < 0)
-			p = p + 4 * x + 6;
-		else {
-			y--;
-			p = p + 4 * (x - y) + 10;
-		}
-	} while(x <= y);
+	int i;
+	for(i = 0; i < r * r; ++i) {
+		int x = i % r, y = i / r;
+		int dist = distance(ax, ay, ax - r / 2 + x, ay - r / 2 + y);
+		if(dist < r)
+			pixel(dst, ax - r / 2 + x, ay - r / 2 + y, color);
+	}
 }
 
 void
@@ -281,18 +280,15 @@ drawcable(uint32_t* dst, Cable* c, int color)
 void
 drawgate(uint32_t* dst, Gate* g)
 {
-	int r = 17, i, clr = g->polarity == 1 ? color4 : g->polarity == 0 ? color0 : color3;
-	if(g->type == NOR) {
-		circle(dst, g->x, g->y, 2, g->polarity == 1 ? color0 : g->polarity == 0 ? color4 : color3);
-		circle(dst, g->x, g->y, 4, g->polarity == 1 ? color4 : g->polarity == 0 ? color0 : color3);
-		return;
-	}
-	for(i = 0; i < r * r; ++i) {
-		int x = i % r, y = i / r;
-		int dist = distance(g->x, g->y, g->x - r / 2 + x, g->y - r / 2 + y);
-		if(dist < r)
-			pixel(dst, g->x - r / 2 + x, g->y - r / 2 + y, clr);
-	}
+	int r = 17;
+	circle(dst, g->x, g->y, r, g->polarity == 1 ? color4 : g->polarity == 0 ? color0 : color3);
+	if(g->type == OUTPUT) {
+		pixel(dst, g->x - 1, g->y, color1);
+		pixel(dst, g->x + 1, g->y, color1);
+		pixel(dst, g->x, g->y - 1, color1);
+		pixel(dst, g->x, g->y + 1, color1);
+	} else
+		pixel(dst, g->x, g->y, color1);
 }
 
 void
@@ -309,11 +305,11 @@ redraw(uint32_t* dst, Brush* b)
 {
 	int i;
 	clear();
+	for(i = 0; i < arena.gates_len; i++)
+		drawgate(dst, &arena.gates[i]);
 	for(i = 0; i < arena.cables_len; i++)
 		drawcable(dst, &arena.cables[i], color2);
 	drawcable(dst, &b->cable, color3);
-	for(i = 0; i < arena.gates_len; i++)
-		drawgate(dst, &arena.gates[i]);
 	SDL_UpdateTexture(gTexture, NULL, dst, WIDTH * sizeof(uint32_t));
 	SDL_RenderClear(gRenderer);
 	SDL_RenderCopy(gRenderer, gTexture, NULL, NULL);
@@ -343,12 +339,18 @@ setup(void)
 {
 	int i;
 	for(i = 0; i < 8; ++i) {
-		int x = i < 4 ? 20 : 28;
-		int y = i < 4 ? 20 + i * 10 : 35 + (i - 5) * 10;
-		arena.inputs[i] = addgate(&arena, 0, 0, x, y);
+		int x = (i % 2 == 0 ? 26 : 20);
+		int y = 30 + i * 6;
+		arena.inputs[i] = addgate(&arena, INPUT, 0, x, y);
 	}
-	addgate(&arena, INPUT, 0, 20, 70);
-	addgate(&arena, INPUT, 1, 28, 75);
+	for(i = 0; i < 6; ++i) {
+		int x = WIDTH - (i % 2 == 0 ? 46 : 40);
+		int y = 30 + i * 6;
+		arena.outputs[i] = addgate(&arena, OUTPUT, 0, x, y);
+		arena.outputs[i]->value = i;
+	}
+	addgate(&arena, INPUT, 0, (10 % 2 == 0 ? 26 : 20), 30 + 10 * 6);
+	addgate(&arena, INPUT, 1, (11 % 2 == 0 ? 26 : 20), 30 + 11 * 6);
 }
 
 /* options */
@@ -402,7 +404,7 @@ domouse(SDL_Event* event, Brush* b)
 		b->x = (event->motion.x - (PAD * ZOOM)) / ZOOM;
 		b->y = (event->motion.y - (PAD * ZOOM)) / ZOOM;
 		if(event->button.button == SDL_BUTTON_RIGHT) {
-			addgate(&arena, 1, -1, b->x, b->y);
+			addgate(&arena, NOR, -1, b->x, b->y);
 			redraw(pixels, b);
 			break;
 		}
