@@ -21,7 +21,6 @@
 #define OCTAVE 36
 
 /* TODO 
-
 flag deleted nodes and wires
 rename gate value for note?
 export image
@@ -65,18 +64,12 @@ typedef struct Brush {
 
 int WIDTH = 8 * HOR + PAD * 2;
 int HEIGHT = 8 * VER + PAD * 2;
-int GUIDES = 0;
 SDL_Window* gWindow = NULL;
 SDL_Renderer* gRenderer = NULL;
 SDL_Texture* gTexture = NULL;
 uint32_t* pixels;
 Arena arena;
 PmStream* midi;
-
-Uint32 begintime = 0;
-Uint32 endtime = 0;
-Uint32 delta = 0;
-short fps = 60;
 
 /* helpers */
 
@@ -278,11 +271,8 @@ addgate(Arena* a, GateType type, int polarity, int x, int y)
 void
 pixel(uint32_t* dst, int x, int y, int color)
 {
-	if(x < 0 || x > WIDTH)
-		return;
-	if(y < 0 || y > HEIGHT)
-		return;
-	dst[(y + PAD) * WIDTH + (x + PAD)] = color;
+	if(x >= 0 && x < WIDTH - PAD * 2 && y >= 0 && y < HEIGHT - PAD * 2)
+		dst[(y + PAD) * WIDTH + (x + PAD)] = color;
 }
 
 void
@@ -488,9 +478,6 @@ dokey(SDL_Event* event, Brush* b)
 	case SDLK_ESCAPE:
 		quit();
 		break;
-	case SDLK_h:
-		GUIDES = !GUIDES;
-		break;
 	case SDLK_n:
 		arena.gates_len = 22;
 		arena.wires_len = 0;
@@ -505,22 +492,14 @@ dokey(SDL_Event* event, Brush* b)
 }
 
 void
-echomidi(void)
-{
-	int i, num = Pm_CountDevices();
-	for(i = 0; i < num; ++i) {
-		PmDeviceInfo const* info = Pm_GetDeviceInfo(i);
-		puts(info->name);
-	}
-}
-
-void
 initmidi(void)
 {
+	int i, select = 0;
 	Pm_Initialize();
-	echomidi();
-	Pm_OpenOutput(&midi, 0, NULL, 128, 0, NULL, 1);
-	printf("Midi Output opened.\n");
+	for(i = 0; i < Pm_CountDevices(); ++i)
+		printf("#%d -> %s%s\n", i,
+		       Pm_GetDeviceInfo(i)->name, i == select ? "(selected)" : "");
+	Pm_OpenOutput(&midi, select, NULL, 128, 0, NULL, 1);
 }
 
 int
@@ -552,19 +531,20 @@ init(void)
 		return error("Pixels", "Failed to allocate memory");
 	clear();
 	initmidi();
-
 	return 1;
 }
 
 int
 main(int argc, char** argv)
 {
+	Uint32 begintime = 0;
+	Uint32 endtime = 0;
+	Uint32 delta = 0;
+	short fps = 60;
+
 	Brush brush;
 	brush.down = 0;
 	brush.wire.active = 0;
-
-	arena.wires_len = 0;
-	arena.gates_len = 0;
 
 	setup();
 
