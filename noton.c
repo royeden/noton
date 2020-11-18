@@ -19,6 +19,16 @@
 #define ROUTEMAX 8
 #define SPEED 40
 
+/* TODO 
+
+flag deleted nodes and wires
+rename wires to wires
+rename gate value for note?
+export image
+colorize piano notes
+gate position should use point2d
+*/
+
 typedef enum {
 	INPUT,
 	OUTPUT,
@@ -29,28 +39,29 @@ typedef struct {
 	int x, y;
 } Point2d;
 
-typedef struct Cable {
+typedef struct Wire {
+	int id, active, polarity, a, b, len;
 	Point2d points[CABLEMAX];
-	int id, a, b, polarity, len;
-} Cable;
+} Wire;
 
 typedef struct Gate {
-	int polarity, id, x, y, inlen, outlen, value;
+	int id, active, polarity, value, inlen, outlen;
+	Point2d pos;
 	GateType type;
-	Cable *inputs[ROUTEMAX], *outputs[ROUTEMAX];
+	Wire *inputs[ROUTEMAX], *outputs[ROUTEMAX];
 } Gate;
 
 typedef struct Arena {
+	int gates_len, wires_len, frame;
 	Gate gates[64];
-	int gates_len, cables_len, frame;
-	Cable cables[64];
+	Wire wires[64];
 	Gate *inputs[8], *outputs[36];
 } Arena;
 
 typedef struct Brush {
 	int x, y;
 	int down;
-	Cable cable;
+	Wire wire;
 } Brush;
 
 int WIDTH = 8 * HOR + PAD * 2;
@@ -82,7 +93,7 @@ findgate(int x, int y)
 {
 	int i;
 	for(i = 0; i < arena.gates_len; ++i)
-		if(distance(x, y, arena.gates[i].x, arena.gates[i].y) < 50)
+		if(distance(x, y, arena.gates[i].pos.x, arena.gates[i].pos.y) < 50)
 			return &arena.gates[i];
 	return NULL;
 }
@@ -143,15 +154,15 @@ bang(Gate* g, int depth)
 }
 
 void
-destroycable(Cable* c)
+destroywire(Wire* c)
 {
 	Gate* ga = findgateid(&arena, c->a);
 	Gate* gb = findgateid(&arena, c->b);
 	if(ga) {
-		printf("Remove cable connection from %d\n", ga->id);
+		printf("Remove wire connection from %d\n", ga->id);
 	}
 	if(gb) {
-		printf("Remove cable connection from %d\n", gb->id);
+		printf("Remove wire connection from %d\n", gb->id);
 	}
 	c->a = -1;
 	c->b = -1;
@@ -166,11 +177,11 @@ destroy(void)
 		return;
 	arena.gates[arena.gates_len - 1].inlen = 0;
 	arena.gates[arena.gates_len - 1].outlen = 0;
-	for(i = 0; i < arena.cables_len; i++) {
-		if(arena.cables[i].a == arena.gates_len - 1)
-			destroycable(&arena.cables[i]);
-		if(arena.cables[i].b == arena.gates_len - 1)
-			destroycable(&arena.cables[i]);
+	for(i = 0; i < arena.wires_len; i++) {
+		if(arena.wires[i].a == arena.gates_len - 1)
+			destroywire(&arena.wires[i]);
+		if(arena.wires[i].b == arena.gates_len - 1)
+			destroywire(&arena.wires[i]);
 	}
 	arena.gates_len--;
 }
@@ -178,7 +189,7 @@ destroy(void)
 /* Cabling */
 
 void
-append(Cable* c, Brush* b)
+append(Wire* c, Brush* b)
 {
 	if(c->len >= CABLEMAX)
 		return;
@@ -190,30 +201,30 @@ append(Cable* c, Brush* b)
 }
 
 void
-begin(Cable* c, Brush* b)
+begin(Wire* c, Brush* b)
 {
 	Gate* gate = findgate(b->x, b->y);
 	if(gate) {
-		b->cable.polarity = gate->polarity;
-		b->x = gate->x;
-		b->y = gate->y;
+		b->wire.polarity = gate->polarity;
+		b->x = gate->pos.x;
+		b->y = gate->pos.y;
 	}
 	c->len = 0;
 	append(c, b);
 }
 
 int
-abandon(Cable* c)
+abandon(Wire* c)
 {
 	c->len = 0;
 	return 0;
 }
 
 int
-terminate(Cable* c, Brush* b)
+terminate(Wire* c, Brush* b)
 {
 	int i;
-	Cable* newcable;
+	Wire* newwire;
 	Gate *gatefrom, *gateto;
 	if(c->len < 1)
 		return abandon(c);
@@ -231,34 +242,34 @@ terminate(Cable* c, Brush* b)
 		return abandon(c);
 	if(gateto->inlen >= ROUTEMAX)
 		return abandon(c);
-	b->x = gateto->x;
-	b->y = gateto->y;
+	b->x = gateto->pos.x;
+	b->y = gateto->pos.y;
 	append(c, b);
 	/* copy */
-	newcable = &arena.cables[arena.cables_len];
-	newcable->id = arena.cables_len;
-	newcable->a = gatefrom->id;
-	newcable->b = gateto->id;
+	newwire = &arena.wires[arena.wires_len];
+	newwire->id = arena.wires_len;
+	newwire->a = gatefrom->id;
+	newwire->b = gateto->id;
 	for(i = 0; i < c->len; i++) {
 		Point2d* bp = &c->points[i];
-		Point2d* cp = &newcable->points[i];
+		Point2d* cp = &newwire->points[i];
 		cp->x = bp->x;
 		cp->y = bp->y;
-		newcable->len++;
+		newwire->len++;
 	}
 	/* connect */
-	gatefrom->outputs[gatefrom->outlen++] = newcable;
-	gateto->inputs[gateto->inlen++] = newcable;
+	gatefrom->outputs[gatefrom->outlen++] = newwire;
+	gateto->inputs[gateto->inlen++] = newwire;
 	polarize(gateto);
-	arena.cables_len++;
+	arena.wires_len++;
 	return abandon(c);
 }
 
 Gate*
 addgate(Arena* a, GateType type, int polarity, int x, int y)
 {
-	a->gates[a->gates_len].x = x;
-	a->gates[a->gates_len].y = y;
+	a->gates[a->gates_len].pos.x = x;
+	a->gates[a->gates_len].pos.y = y;
 	a->gates[a->gates_len].id = a->gates_len;
 	a->gates[a->gates_len].type = type;
 	a->gates[a->gates_len].polarity = polarity;
@@ -316,7 +327,7 @@ update(void)
 }
 
 void
-drawcable(uint32_t* dst, Cable* c, int color)
+drawwire(uint32_t* dst, Wire* c, int color)
 {
 	int i;
 	for(i = 0; i < c->len - 1; i++) {
@@ -334,14 +345,14 @@ void
 drawgate(uint32_t* dst, Gate* g)
 {
 	int r = 17;
-	circle(dst, g->x, g->y, r, g->polarity == 1 ? color4 : g->polarity == 0 ? color0 : color3);
+	circle(dst, g->pos.x, g->pos.y, r, g->polarity == 1 ? color4 : g->polarity == 0 ? color0 : color3);
 	if(g->type == OUTPUT) {
-		pixel(dst, g->x - 1, g->y, color1);
-		pixel(dst, g->x + 1, g->y, color1);
-		pixel(dst, g->x, g->y - 1, color1);
-		pixel(dst, g->x, g->y + 1, color1);
+		pixel(dst, g->pos.x - 1, g->pos.y, color1);
+		pixel(dst, g->pos.x + 1, g->pos.y, color1);
+		pixel(dst, g->pos.x, g->pos.y - 1, color1);
+		pixel(dst, g->pos.x, g->pos.y + 1, color1);
 	} else
-		pixel(dst, g->x, g->y, color1);
+		pixel(dst, g->pos.x, g->pos.y, color1);
 }
 
 void
@@ -360,9 +371,9 @@ redraw(uint32_t* dst, Brush* b)
 	clear();
 	for(i = 0; i < arena.gates_len; i++)
 		drawgate(dst, &arena.gates[i]);
-	for(i = 0; i < arena.cables_len; i++)
-		drawcable(dst, &arena.cables[i], color2);
-	drawcable(dst, &b->cable, color3);
+	for(i = 0; i < arena.wires_len; i++)
+		drawwire(dst, &arena.wires[i], color2);
+	drawwire(dst, &b->wire, color3);
 	SDL_UpdateTexture(gTexture, NULL, dst, WIDTH * sizeof(uint32_t));
 	SDL_RenderClear(gRenderer);
 	SDL_RenderCopy(gRenderer, gTexture, NULL, NULL);
@@ -440,7 +451,7 @@ domouse(SDL_Event* event, Brush* b)
 		if(event->button.button == SDL_BUTTON_RIGHT)
 			break;
 		b->down = 1;
-		begin(&b->cable, b);
+		begin(&b->wire, b);
 		redraw(pixels, b);
 		break;
 	case SDL_MOUSEMOTION:
@@ -449,7 +460,7 @@ domouse(SDL_Event* event, Brush* b)
 		if(b->down) {
 			b->x = (event->motion.x - (PAD * ZOOM)) / ZOOM;
 			b->y = (event->motion.y - (PAD * ZOOM)) / ZOOM;
-			append(&b->cable, b);
+			append(&b->wire, b);
 			redraw(pixels, b);
 		}
 		break;
@@ -462,7 +473,7 @@ domouse(SDL_Event* event, Brush* b)
 			break;
 		}
 		b->down = 0;
-		terminate(&b->cable, b);
+		terminate(&b->wire, b);
 		redraw(pixels, b);
 		break;
 	}
@@ -481,7 +492,7 @@ dokey(SDL_Event* event, Brush* b)
 		break;
 	case SDLK_n:
 		arena.gates_len = 22;
-		arena.cables_len = 0;
+		arena.wires_len = 0;
 		redraw(pixels, b);
 		break;
 	case SDLK_BACKSPACE:
