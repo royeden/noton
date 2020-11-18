@@ -90,7 +90,7 @@ findgate(int x, int y)
 Gate*
 findgateid(Arena* a, int id)
 {
-	return &a->gates[id];
+	return id >= 0 ? &a->gates[id] : NULL;
 }
 
 int
@@ -140,6 +140,39 @@ bang(Gate* g, int depth)
 	polarize(g);
 	for(i = 0; i < g->outlen; ++i)
 		bang(findgateid(&arena, g->outputs[i]->b), a);
+}
+
+void
+destroycable(Cable* c)
+{
+	Gate* ga = findgateid(&arena, c->a);
+	Gate* gb = findgateid(&arena, c->b);
+	if(ga) {
+		printf("Remove cable connection from %d\n", ga->id);
+	}
+	if(gb) {
+		printf("Remove cable connection from %d\n", gb->id);
+	}
+	c->a = -1;
+	c->b = -1;
+	c->len = 0;
+}
+
+void
+destroy(void)
+{
+	int i;
+	if(arena.gates_len <= 22)
+		return;
+	arena.gates[arena.gates_len - 1].inlen = 0;
+	arena.gates[arena.gates_len - 1].outlen = 0;
+	for(i = 0; i < arena.cables_len; i++) {
+		if(arena.cables[i].a == arena.gates_len - 1)
+			destroycable(&arena.cables[i]);
+		if(arena.cables[i].b == arena.gates_len - 1)
+			destroycable(&arena.cables[i]);
+	}
+	arena.gates_len--;
 }
 
 /* Cabling */
@@ -452,6 +485,7 @@ dokey(SDL_Event* event, Brush* b)
 		redraw(pixels, b);
 		break;
 	case SDLK_BACKSPACE:
+		destroy();
 		redraw(pixels, b);
 		break;
 	}
