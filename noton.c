@@ -1,6 +1,9 @@
 #include <SDL2/SDL.h>
 #include <portmidi.h>
+#include "porttime.h"
 #include <stdio.h>
+
+#define TIME_PROC ((int32_t(*)(void*))Pt_Time)
 
 #define HOR 32
 #define VER 16
@@ -11,6 +14,9 @@
 #define color3 0xcccccc
 #define color4 0x72dec2
 #define color0 0xffb545
+
+#define CABLEMAX 128
+#define ROUTEMAX 8
 
 typedef enum {
 	INPUT,
@@ -23,14 +29,14 @@ typedef struct {
 } Point2d;
 
 typedef struct Cable {
-	Point2d points[256];
+	Point2d points[CABLEMAX];
 	int id, a, b, polarity, len;
 } Cable;
 
 typedef struct Gate {
 	int polarity, id, x, y, inlen, outlen, value;
 	GateType type;
-	Cable *inputs[32], *outputs[32];
+	Cable *inputs[ROUTEMAX], *outputs[ROUTEMAX];
 } Gate;
 
 typedef struct Arena {
@@ -55,6 +61,7 @@ SDL_Renderer* gRenderer = NULL;
 SDL_Texture* gTexture = NULL;
 uint32_t* pixels;
 Arena arena;
+PmStream* midi;
 
 /* helpers */
 
@@ -95,9 +102,12 @@ getpolarity(Gate* g)
 }
 
 void
-playnote(int value, int z)
+playnote(int val, int z)
 {
-	printf("play: %d -> %d\n", value, z);
+	if(z)
+		Pm_WriteShort(midi, TIME_PROC(NULL), Pm_Message(0x90, 60 + val, 100));
+	else
+		Pm_WriteShort(midi, TIME_PROC(NULL), Pm_Message(0x90, 60 + val, 0));
 }
 
 void
@@ -106,7 +116,7 @@ polarize(Gate* g)
 	int i;
 	if(g->type == OUTPUT) {
 		int newpolarity = getpolarity(g);
-		if(g->polarity != newpolarity)
+		if(newpolarity != -1 && g->polarity != newpolarity)
 			playnote(g->value, newpolarity);
 		g->polarity = newpolarity;
 	} else if(g->type)
@@ -122,10 +132,8 @@ bang(Gate* g, int depth)
 	if(a < 1 || !g)
 		return;
 	polarize(g);
-	for(i = 0; i < g->outlen; ++i) {
-		Gate* next = findgateid(&arena, g->outputs[i]->b);
-		bang(next, a);
-	}
+	for(i = 0; i < g->outlen; ++i)
+		bang(findgateid(&arena, g->outputs[i]->b), a);
 }
 
 /* Cabling */
@@ -133,6 +141,8 @@ bang(Gate* g, int depth)
 void
 append(Cable* c, Brush* b)
 {
+	if(c->len >= CABLEMAX)
+		return;
 	if(c->len == 0 || (c->len > 0 && distance(c->points[c->len - 1].x, c->points[c->len - 1].y, b->x, b->y) > 20)) {
 		c->points[c->len].x = b->x;
 		c->points[c->len].y = b->y;
@@ -177,6 +187,10 @@ terminate(Cable* c, Brush* b)
 	if(!gateto->type)
 		return abandon(c);
 	if(gatefrom == gateto)
+		return abandon(c);
+	if(gatefrom->outlen >= ROUTEMAX)
+		return abandon(c);
+	if(gateto->inlen >= ROUTEMAX)
 		return abandon(c);
 	b->x = gateto->x;
 	b->y = gateto->y;
@@ -320,14 +334,14 @@ void
 run(uint32_t* dst, Brush* b)
 {
 	int i;
-	arena.inputs[0]->polarity = arena.frame % 2;
-	arena.inputs[1]->polarity = (arena.frame / 2) % 2;
-	arena.inputs[2]->polarity = (arena.frame / 4) % 2;
-	arena.inputs[3]->polarity = (arena.frame / 8) % 2;
+	arena.inputs[0]->polarity = (arena.frame / 4) % 2;
+	arena.inputs[2]->polarity = (arena.frame / 8) % 2;
 	arena.inputs[4]->polarity = (arena.frame / 16) % 2;
-	arena.inputs[5]->polarity = (arena.frame / 32) % 2;
-	arena.inputs[6]->polarity = (arena.frame / 64) % 2;
-	arena.inputs[7]->polarity = (arena.frame / 128) % 2;
+	arena.inputs[6]->polarity = (arena.frame / 32) % 2;
+	arena.inputs[1]->polarity = (arena.frame / 8) % 4 == 0;
+	arena.inputs[3]->polarity = (arena.frame / 8) % 4 == 1;
+	arena.inputs[5]->polarity = (arena.frame / 8) % 4 == 2;
+	arena.inputs[7]->polarity = (arena.frame / 8) % 4 == 3;
 	for(i = 0; i < arena.gates_len; ++i)
 		bang(&arena.gates[i], 10);
 	redraw(dst, b);
@@ -343,7 +357,7 @@ setup(void)
 		int y = 30 + i * 6;
 		arena.inputs[i] = addgate(&arena, INPUT, 0, x, y);
 	}
-	for(i = 0; i < 6; ++i) {
+	for(i = 0; i < 12; ++i) {
 		int x = WIDTH - (i % 2 == 0 ? 46 : 40);
 		int y = 30 + i * 6;
 		arena.outputs[i] = addgate(&arena, OUTPUT, 0, x, y);
@@ -426,6 +440,11 @@ dokey(SDL_Event* event, Brush* b)
 	case SDLK_h:
 		GUIDES = !GUIDES;
 		break;
+	case SDLK_n:
+		arena.gates_len = 22;
+		arena.cables_len = 0;
+		redraw(pixels, b);
+		break;
 	case SDLK_BACKSPACE:
 		redraw(pixels, b);
 		break;
@@ -434,13 +453,22 @@ dokey(SDL_Event* event, Brush* b)
 }
 
 void
-print_devices(void)
+echomidi(void)
 {
 	int i, num = Pm_CountDevices();
 	for(i = 0; i < num; ++i) {
 		PmDeviceInfo const* info = Pm_GetDeviceInfo(i);
 		puts(info->name);
 	}
+}
+
+void
+initmidi(void)
+{
+	Pm_Initialize();
+	echomidi();
+	Pm_OpenOutput(&midi, 0, NULL, 128, 0, NULL, 1);
+	printf("Midi Output opened.\n");
 }
 
 int
@@ -471,9 +499,7 @@ init(void)
 	if(pixels == NULL)
 		return error("Pixels", "Failed to allocate memory");
 	clear();
-	Pm_Initialize();
-
-	print_devices();
+	initmidi();
 
 	return 1;
 }
