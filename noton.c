@@ -17,6 +17,7 @@
 
 #define CABLEMAX 128
 #define ROUTEMAX 8
+#define SPEED 40
 
 typedef enum {
 	INPUT,
@@ -63,11 +64,10 @@ uint32_t* pixels;
 Arena arena;
 PmStream* midi;
 
-Uint32 start = 0;
+Uint32 begintime = 0;
 Uint32 endtime = 0;
 Uint32 delta = 0;
 short fps = 60;
-short speed = 30;
 
 /* helpers */
 
@@ -111,9 +111,9 @@ void
 playnote(int val, int z)
 {
 	if(z)
-		Pm_WriteShort(midi, TIME_PROC(NULL), Pm_Message(0x90, 60 + val, 100));
+		Pm_WriteShort(midi, TIME_PROC(NULL), Pm_Message(0x90, 36 + val, 100));
 	else
-		Pm_WriteShort(midi, TIME_PROC(NULL), Pm_Message(0x90, 60 + val, 0));
+		Pm_WriteShort(midi, TIME_PROC(NULL), Pm_Message(0x90, 36 + val, 0));
 }
 
 void
@@ -513,8 +513,6 @@ init(void)
 int
 main(int argc, char** argv)
 {
-	int ticknext = 0;
-
 	Brush brush;
 	brush.down = 0;
 
@@ -527,17 +525,15 @@ main(int argc, char** argv)
 
 	while(1) {
 		SDL_Event event;
-		if(!start)
-			start = SDL_GetTicks();
+		if(!begintime)
+			begintime = SDL_GetTicks();
 		else
-			delta = endtime - start;
+			delta = endtime - begintime;
 
-		if(delta < speed)
-			SDL_Delay(speed - delta);
-
-		if(delta > speed)
+		if(delta < SPEED)
+			SDL_Delay(SPEED - delta);
+		if(delta > SPEED)
 			fps = 1000 / delta;
-
 		if(fps < 15)
 			printf("Slowdown: %ifps\n", fps);
 
@@ -557,9 +553,11 @@ main(int argc, char** argv)
 					redraw(pixels, &brush);
 		}
 
-		start = endtime;
+		begintime = endtime;
 		endtime = SDL_GetTicks();
 	}
 	quit();
+	(void)argc;
+	(void)argv;
 	return 0;
 }
