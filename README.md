@@ -4,11 +4,7 @@ A minimal logic gates playground, written in ANSI C.
 
 ## Build
 
-To build noton, you must have [SDL2](https://wiki.libsdl.org/) and [PortMidi](http://portmedia.sourceforge.net/portmidi/).
-
-```
-sudo apt-get install libsdl2-dev
-```
+To build [noton](https://wiki.xxiivv.com/noton), you must have [SDL2](https://wiki.libsdl.org/) and [PortMidi](http://portmedia.sourceforge.net/portmidi/).
 
 ## Controls
 

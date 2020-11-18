@@ -63,6 +63,12 @@ uint32_t* pixels;
 Arena arena;
 PmStream* midi;
 
+Uint32 start = 0;
+Uint32 endtime = 0;
+Uint32 delta = 0;
+short fps = 60;
+short speed = 30;
+
 /* helpers */
 
 int
@@ -508,7 +514,6 @@ int
 main(int argc, char** argv)
 {
 	int ticknext = 0;
-	int tickrun = 0;
 
 	Brush brush;
 	brush.down = 0;
@@ -521,16 +526,22 @@ main(int argc, char** argv)
 	update();
 
 	while(1) {
-		int tick = SDL_GetTicks();
 		SDL_Event event;
-		if(tick < ticknext)
-			SDL_Delay(ticknext - tick);
+		if(!start)
+			start = SDL_GetTicks();
+		else
+			delta = endtime - start;
 
-		if(tickrun == 1024 * 16) {
-			run(pixels, &brush);
-			tickrun = 0;
-		}
-		tickrun++;
+		if(delta < speed)
+			SDL_Delay(speed - delta);
+
+		if(delta > speed)
+			fps = 1000 / delta;
+
+		if(fps < 15)
+			printf("Slowdown: %ifps\n", fps);
+
+		run(pixels, &brush);
 
 		while(SDL_PollEvent(&event) != 0) {
 			if(event.type == SDL_QUIT)
@@ -545,6 +556,9 @@ main(int argc, char** argv)
 				if(event.window.event == SDL_WINDOWEVENT_EXPOSED)
 					redraw(pixels, &brush);
 		}
+
+		start = endtime;
+		endtime = SDL_GetTicks();
 	}
 	quit();
 	return 0;
