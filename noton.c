@@ -44,7 +44,7 @@ typedef struct Gate {
 } Gate;
 
 typedef struct Arena {
-	int wires_len, frame;
+	int frame;
 	Gate gates[GATEMAX];
 	Wire wires[WIREMAX];
 	Gate *inputs[8], *outputs[12];
@@ -127,9 +127,7 @@ findgateat(Arena* a, Point2d pos)
 	int i;
 	for(i = 0; i < GATEMAX; ++i) {
 		Gate* g = &a->gates[i];
-		if(!g->active)
-			continue;
-		if(distance(pos, g->pos) < 50)
+		if(g->active && distance(pos, g->pos) < 50)
 			return g;
 	}
 	return NULL;
@@ -206,6 +204,38 @@ destroy(void)
 
 /* Wiring */
 
+Wire*
+addwire(Arena* a, Wire* temp, Gate* from, Gate* to)
+{
+	int i;
+	Wire* w = availwire(a);
+	printf("Created wire #%d(#%d->#%d) \n", w->id, from->id, to->id);
+	w->active = 1;
+	w->polarity = -1;
+	w->a = from->id;
+	w->b = to->id;
+	for(i = 0; i < temp->len; i++) {
+		setpt2d(&w->points[i], temp->points[i].x, temp->points[i].y);
+		w->len++;
+	}
+	return w;
+}
+
+Gate*
+addgate(Arena* a, GateType type, int polarity, Point2d pos)
+{
+	Gate* g = availgate(a);
+	printf("Created gate #%d(%d) \n", g->id, type);
+	g->active = 1;
+	g->polarity = polarity;
+	g->value = 0;
+	g->inlen = 0;
+	g->outlen = 0;
+	g->type = type;
+	g->pos = pos;
+	return g;
+}
+
 void
 extendwire(Wire* c, Brush* b)
 {
@@ -239,7 +269,6 @@ abandon(Wire* c, Brush* b)
 int
 endwire(Wire* c, Brush* b)
 {
-	int i;
 	Wire* newwire;
 	Gate *gatefrom, *gateto;
 	if(c->len < 1)
@@ -261,39 +290,12 @@ endwire(Wire* c, Brush* b)
 	setpt2d(&b->pos, gateto->pos.x, gateto->pos.y);
 	extendwire(c, b);
 	/* copy */
-	newwire = &arena.wires[arena.wires_len];
-	newwire->id = arena.wires_len;
-	newwire->active = 1;
-	newwire->a = gatefrom->id;
-	newwire->b = gateto->id;
-	for(i = 0; i < c->len; i++) {
-		Point2d* bp = &c->points[i];
-		Point2d* cp = &newwire->points[i];
-		cp->x = bp->x;
-		cp->y = bp->y;
-		newwire->len++;
-	}
+	newwire = addwire(&arena, c, gatefrom, gateto);
 	/* connect */
 	gatefrom->outputs[gatefrom->outlen++] = newwire;
 	gateto->inputs[gateto->inlen++] = newwire;
 	polarize(gateto);
-	arena.wires_len++;
 	return abandon(c, b);
-}
-
-Gate*
-addgate(Arena* a, GateType type, int polarity, Point2d pos)
-{
-	Gate* g = availgate(a);
-	printf("Created gate #%d(%d) \n", g->id, type);
-	g->active = 1;
-	g->polarity = polarity;
-	g->value = 0;
-	g->inlen = 0;
-	g->outlen = 0;
-	g->type = type;
-	g->pos = pos;
-	return g;
 }
 
 /* draw */
@@ -328,14 +330,13 @@ line(uint32_t* dst, int ax, int ay, int bx, int by, int color)
 }
 
 void
-circle(uint32_t* dst, int ax, int ay, int r, int color)
+circle(uint32_t* dst, int ax, int ay, int d, int color)
 {
-	int i;
-	for(i = 0; i < r * r; ++i) {
-		int x = i % r, y = i / r;
-		int dist = distance(Pt2d(ax, ay), Pt2d(ax - r / 2 + x, ay - r / 2 + y));
-		if(dist < r)
-			pixel(dst, ax - r / 2 + x, ay - r / 2 + y, color);
+	int i, r = d / 2;
+	for(i = 0; i < d * d; ++i) {
+		int x = i % d, y = i / d;
+		if(distance(Pt2d(ax, ay), Pt2d(ax - r + x, ay - r + y)) < d)
+			pixel(dst, ax - r + x, ay - r + y, color);
 	}
 }
 
@@ -373,26 +374,25 @@ drawgate(uint32_t* dst, Gate* g)
 }
 
 void
-clear(void)
+clear(uint32_t* dst)
 {
 	int i, j;
 	for(i = 0; i < HEIGHT; i++)
 		for(j = 0; j < WIDTH; j++)
-			pixels[i * WIDTH + j] = color1;
+			dst[i * WIDTH + j] = color1;
 }
 
 void
 redraw(uint32_t* dst, Brush* b)
 {
 	int i;
-	clear();
+	clear(dst);
 	for(i = 0; i < GATEMAX; i++)
 		drawgate(dst, &arena.gates[i]);
 	for(i = 0; i < WIREMAX; i++)
 		drawwire(dst, &arena.wires[i], color2);
 	if(b->wire.active)
 		drawwire(dst, &b->wire, color3);
-
 	SDL_UpdateTexture(gTexture, NULL, dst, WIDTH * sizeof(uint32_t));
 	SDL_RenderClear(gRenderer);
 	SDL_RenderCopy(gRenderer, gTexture, NULL, NULL);
@@ -400,7 +400,7 @@ redraw(uint32_t* dst, Brush* b)
 }
 
 void
-run(uint32_t* dst, Brush* b)
+run(void)
 {
 	int i;
 	arena.inputs[0]->polarity = (arena.frame / 4) % 2;
@@ -413,7 +413,6 @@ run(uint32_t* dst, Brush* b)
 	arena.inputs[7]->polarity = (arena.frame / 8) % 4 == 3;
 	for(i = 0; i < GATEMAX; ++i)
 		bang(&arena.gates[i], 10);
-	redraw(dst, b);
 	arena.frame++;
 }
 
@@ -555,7 +554,7 @@ init(void)
 	pixels = (uint32_t*)malloc(WIDTH * HEIGHT * sizeof(uint32_t));
 	if(pixels == NULL)
 		return error("Pixels", "Failed to allocate memory");
-	clear();
+	clear(pixels);
 	initmidi();
 	return 1;
 }
@@ -591,7 +590,8 @@ main(int argc, char** argv)
 		if(fps < 15)
 			printf("Slowdown: %ifps\n", fps);
 
-		run(pixels, &brush);
+		run();
+		redraw(pixels, &brush);
 
 		while(SDL_PollEvent(&event) != 0) {
 			if(event.type == SDL_QUIT)
