@@ -68,9 +68,9 @@ PmStream* midi;
 /* helpers */
 
 int
-distance(int ax, int ay, int bx, int by)
+distance(Point2d a, Point2d b)
 {
-	return (bx - ax) * (bx - ax) + (by - ay) * (by - ay);
+	return (b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y);
 }
 
 Point2d*
@@ -129,7 +129,7 @@ findgateat(Arena* a, Point2d pos)
 		Gate* g = &a->gates[i];
 		if(!g->active)
 			continue;
-		if(distance(pos.x, pos.y, g->pos.x, g->pos.y) < 50)
+		if(distance(pos, g->pos) < 50)
 			return g;
 	}
 	return NULL;
@@ -211,7 +211,7 @@ extendwire(Wire* c, Brush* b)
 {
 	if(c->len >= CABLEMAX)
 		return;
-	if(c->len == 0 || (c->len > 0 && distance(c->points[c->len - 1].x, c->points[c->len - 1].y, b->pos.x, b->pos.y) > 20))
+	if(c->len == 0 || (c->len > 0 && distance(c->points[c->len - 1], b->pos) > 20))
 		setpt2d(&c->points[c->len++], b->pos.x, b->pos.y);
 }
 
@@ -333,7 +333,7 @@ circle(uint32_t* dst, int ax, int ay, int r, int color)
 	int i;
 	for(i = 0; i < r * r; ++i) {
 		int x = i % r, y = i / r;
-		int dist = distance(ax, ay, ax - r / 2 + x, ay - r / 2 + y);
+		int dist = distance(Pt2d(ax, ay), Pt2d(ax - r / 2 + x, ay - r / 2 + y));
 		if(dist < r)
 			pixel(dst, ax - r / 2 + x, ay - r / 2 + y, color);
 	}
