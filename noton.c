@@ -37,7 +37,7 @@ typedef struct Wire {
 } Wire;
 
 typedef struct Gate {
-	int id, active, polarity, value, inlen, outlen;
+	int id, active, polarity, value, locked, inlen, outlen;
 	Point2d pos;
 	GateType type;
 	Wire *inputs[PORTMAX], *outputs[PORTMAX];
@@ -98,6 +98,16 @@ playnote(int val, int z)
 }
 
 Gate*
+findgateid(Arena* a, int id)
+{
+	if(id < 0 || id >= GATEMAX)
+		return NULL;
+	if(!&a->gates[id] || !a->gates[id].active)
+		return NULL;
+	return &a->gates[id];
+}
+
+Gate*
 availgate(Arena* a)
 {
 	int i;
@@ -131,12 +141,6 @@ findgateat(Arena* a, Point2d pos)
 			return g;
 	}
 	return NULL;
-}
-
-Gate*
-findgateid(Arena* a, int id)
-{
-	return id >= 0 && &a->gates[id] ? &a->gates[id] : NULL;
 }
 
 int
@@ -185,21 +189,18 @@ bang(Gate* g, int depth)
 }
 
 void
-destroy(void)
+destroy(Arena* a)
 {
-	/*
 	int i;
-	if(arena.gates_len <= 22)
+	for(i = GATEMAX - 1; i >= 0; --i) {
+		if(!a->gates[i].active)
+			continue;
+		if(a->gates[i].locked)
+			continue;
+		a->gates[i].active = 0;
 		return;
-	arena.gates[arena.gates_len - 1].active = 0;
-	for(i = 0; i < arena.wires_len; i++) {
-		if(arena.wires[i].a == arena.gates_len - 1)
-			arena.wires[i].active = 0;
-		if(arena.wires[i].b == arena.gates_len - 1)
-			arena.wires[i].active = 0;
 	}
-	arena.gates_len--;
-	*/
+	printf("Nothing to erase\n");
 }
 
 /* Wiring */
@@ -420,15 +421,20 @@ void
 setup(void)
 {
 	int i;
+	Gate *gtrue, *gfalse;
 	for(i = 0; i < 8; ++i) {
 		arena.inputs[i] = addgate(&arena, INPUT, 0, Pt2d(i % 2 == 0 ? 26 : 20, 30 + i * 6));
+		arena.inputs[i]->locked = 1;
 	}
 	for(i = 0; i < 12; ++i) {
 		arena.outputs[i] = addgate(&arena, OUTPUT, 0, Pt2d(WIDTH - (i % 2 == 0 ? 46 : 40), 30 + i * 6));
+		arena.outputs[i]->locked = 1;
 		arena.outputs[i]->value = i;
 	}
-	addgate(&arena, INPUT, 0, Pt2d((10 % 2 == 0 ? 26 : 20), 30 + 10 * 6));
-	addgate(&arena, INPUT, 1, Pt2d((11 % 2 == 0 ? 26 : 20), 30 + 11 * 6));
+	gfalse = addgate(&arena, INPUT, 0, Pt2d((10 % 2 == 0 ? 26 : 20), 30 + 10 * 6));
+	gfalse->locked = 1;
+	gtrue = addgate(&arena, INPUT, 1, Pt2d((11 % 2 == 0 ? 26 : 20), 30 + 11 * 6));
+	gtrue->locked = 1;
 }
 
 /* options */
@@ -485,7 +491,8 @@ domouse(SDL_Event* event, Brush* b)
 		        (event->motion.x - (PAD * ZOOM)) / ZOOM,
 		        (event->motion.y - (PAD * ZOOM)) / ZOOM);
 		if(event->button.button == SDL_BUTTON_RIGHT) {
-			addgate(&arena, XOR, -1, b->pos);
+			if(!findgateat(&arena, b->pos))
+				addgate(&arena, XOR, -1, b->pos);
 			redraw(pixels, b);
 			break;
 		}
@@ -510,7 +517,7 @@ dokey(SDL_Event* event, Brush* b)
 		break;
 	case SDLK_BACKSPACE:
 		/* TODO */
-		destroy();
+		destroy(&arena);
 		redraw(pixels, b);
 		break;
 	}
