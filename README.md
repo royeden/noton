@@ -23,7 +23,6 @@ To build [noton](https://wiki.xxiivv.com/noton), you must have [SDL2](https://wi
 - Implement erase
 - Consider changing output to 1 note of 8 bits instead of 12 notes.
 - flag deleted nodes and wires
-- rename gate value for note?
 - export image
 - colorize piano notes
 

@@ -15,7 +15,7 @@
 
 #define GATEMAX 64
 #define WIREMAX 128
-#define PORTMAX 8
+#define PORTMAX 32
 
 #define INPUTLEN 8
 #define OUTPUTLEN 12
@@ -40,7 +40,8 @@ typedef struct Wire {
 } Wire;
 
 typedef struct Gate {
-	int id, active, polarity, value, locked, inlen, outlen;
+	int id, active, polarity, locked, inlen, outlen;
+	int chan, note, shrp;
 	Point2d pos;
 	GateType type;
 	Wire *inputs[PORTMAX], *outputs[PORTMAX];
@@ -61,6 +62,7 @@ typedef struct Brush {
 
 int WIDTH = 8 * HOR + PAD * 2;
 int HEIGHT = 8 * VER + PAD * 2;
+int INSTR = 0;
 SDL_Window* gWindow = NULL;
 SDL_Renderer* gRenderer = NULL;
 SDL_Texture* gTexture = NULL;
@@ -93,11 +95,11 @@ Pt2d(int x, int y)
 }
 
 void
-playnote(int val, int z)
+playnote(int chan, int note, int z)
 {
 	Pm_WriteShort(midi,
 	              Pt_Time(),
-	              Pm_Message(0x90, OCTAVE + val, z ? 100 : 0));
+	              Pm_Message(0x90 + chan + INSTR, OCTAVE + note, z ? 100 : 0));
 }
 
 Gate*
@@ -170,7 +172,7 @@ polarize(Gate* g)
 	if(g->type == OUTPUT) {
 		int newpolarity = getpolarity(g);
 		if(newpolarity != -1 && g->polarity != newpolarity)
-			playnote(g->value, newpolarity);
+			playnote(g->chan, g->note, newpolarity);
 		g->polarity = newpolarity;
 	} else if(g->type)
 		g->polarity = getpolarity(g);
@@ -214,7 +216,9 @@ addgate(Arena* a, GateType type, int polarity, Point2d pos)
 	printf("Added gate #%d \n", g->id);
 	g->active = 1;
 	g->polarity = polarity;
-	g->value = 0;
+	g->chan = 0;
+	g->note = 0;
+	g->shrp = 0;
 	g->inlen = 0;
 	g->outlen = 0;
 	g->type = type;
@@ -239,6 +243,7 @@ beginwire(Brush* b)
 {
 	Gate* gate = findgateat(&arena, b->pos);
 	b->wire.active = 1;
+	b->wire.polarity = -1;
 	if(gate) {
 		b->wire.polarity = gate->polarity;
 		setpt2d(&b->pos, gate->pos.x, gate->pos.y);
@@ -354,10 +359,10 @@ drawgate(uint32_t* dst, Gate* g)
 		return;
 	circle(dst, g->pos.x, g->pos.y, r, g->polarity == 1 ? color4 : g->polarity == 0 ? color0 : color3);
 	if(g->type == OUTPUT) {
-		pixel(dst, g->pos.x - 1, g->pos.y, color1);
-		pixel(dst, g->pos.x + 1, g->pos.y, color1);
-		pixel(dst, g->pos.x, g->pos.y - 1, color1);
-		pixel(dst, g->pos.x, g->pos.y + 1, color1);
+		pixel(dst, g->pos.x - 1, g->pos.y, g->shrp ? color2 : color1);
+		pixel(dst, g->pos.x + 1, g->pos.y, g->shrp ? color2 : color1);
+		pixel(dst, g->pos.x, g->pos.y - 1, g->shrp ? color2 : color1);
+		pixel(dst, g->pos.x, g->pos.y + 1, g->shrp ? color2 : color1);
 	} else
 		pixel(dst, g->pos.x, g->pos.y, color1);
 }
@@ -412,14 +417,24 @@ setup(void)
 {
 	int i;
 	Gate *gtrue, *gfalse;
+	int octave[12] = {0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0};
 	for(i = 0; i < INPUTLEN; ++i) {
-		arena.inputs[i] = addgate(&arena, INPUT, 0, Pt2d(i % 2 == 0 ? 26 : 20, 30 + i * 6));
+		arena.inputs[i] = addgate(&arena, INPUT, 0, Pt2d(i % 2 == 0 ? 27 : 20, 30 + i * 6));
 		arena.inputs[i]->locked = 1;
 	}
 	for(i = 0; i < OUTPUTLEN; ++i) {
-		arena.outputs[i] = addgate(&arena, OUTPUT, 0, Pt2d(WIDTH - (i % 2 == 0 ? 46 : 40), 30 + i * 6));
+		arena.outputs[i] = addgate(&arena, OUTPUT, 0, Pt2d(WIDTH - (i % 2 == 0 ? 61 : 54), 30 + i * 6));
 		arena.outputs[i]->locked = 1;
-		arena.outputs[i]->value = i;
+		arena.outputs[i]->note = i - 12;
+		arena.outputs[i]->chan = 0;
+		arena.outputs[i]->shrp = octave[abs(arena.outputs[i]->note) % 12];
+	}
+	for(i = 0; i < OUTPUTLEN; ++i) {
+		arena.outputs[i] = addgate(&arena, OUTPUT, 0, Pt2d(WIDTH - (i % 2 == 0 ? 47 : 40), 30 + i * 6));
+		arena.outputs[i]->locked = 1;
+		arena.outputs[i]->note = i + 24;
+		arena.outputs[i]->chan = 1;
+		arena.outputs[i]->shrp = octave[abs(arena.outputs[i]->note) % 12];
 	}
 	gfalse = addgate(&arena, INPUT, 0, Pt2d((10 % 2 == 0 ? 26 : 20), 30 + 10 * 6));
 	gfalse->locked = 1;
@@ -504,6 +519,21 @@ dokey(SDL_Event* event, Brush* b)
 	case SDLK_n:
 		/* TODO */
 		redraw(pixels, b);
+		break;
+	case SDLK_1:
+		INSTR = 0;
+		break;
+	case SDLK_2:
+		INSTR = 1;
+		break;
+	case SDLK_3:
+		INSTR = 2;
+		break;
+	case SDLK_4:
+		INSTR = 3;
+		break;
+	case SDLK_5:
+		INSTR = 4;
 		break;
 	case SDLK_BACKSPACE:
 		/* TODO */
