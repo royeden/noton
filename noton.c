@@ -15,17 +15,13 @@
 #define color4 0x72dec2
 #define color0 0xffb545
 
+#define GATEMAX 64
+#define WIREMAX 128
+#define PORTMAX 8
+
 #define CABLEMAX 128
-#define ROUTEMAX 8
 #define SPEED 40
 #define OCTAVE 36
-
-/* TODO 
-flag deleted nodes and wires
-rename gate value for note?
-export image
-colorize piano notes
-*/
 
 typedef enum {
 	INPUT,
@@ -46,18 +42,18 @@ typedef struct Gate {
 	int id, active, polarity, value, inlen, outlen;
 	Point2d pos;
 	GateType type;
-	Wire *inputs[ROUTEMAX], *outputs[ROUTEMAX];
+	Wire *inputs[PORTMAX], *outputs[PORTMAX];
 } Gate;
 
 typedef struct Arena {
-	int gates_len, wires_len, frame;
-	Gate gates[64];
-	Wire wires[64];
-	Gate *inputs[8], *outputs[36];
+	int wires_len, frame;
+	Gate gates[GATEMAX];
+	Wire wires[WIREMAX];
+	Gate *inputs[8], *outputs[12];
 } Arena;
 
 typedef struct Brush {
-	int x, y;
+	Point2d pos;
 	int down;
 	Wire wire;
 } Brush;
@@ -96,11 +92,25 @@ playnote(int val, int z)
 }
 
 Gate*
+availgate(Arena* a)
+{
+	int i;
+	for(i = 0; i < GATEMAX; ++i)
+		if(!a->gates[i].active) {
+			a->gates[i].id = i;
+			return &a->gates[i];
+		}
+	return NULL;
+}
+
+Gate*
 findgateat(Arena* a, int x, int y)
 {
 	int i;
-	for(i = 0; i < a->gates_len; ++i) {
+	for(i = 0; i < GATEMAX; ++i) {
 		Gate* g = &a->gates[i];
+		if(!g->active)
+			continue;
 		if(distance(x, y, g->pos.x, g->pos.y) < 50)
 			return g;
 	}
@@ -117,6 +127,8 @@ int
 getpolarity(Gate* g)
 {
 	int i;
+	if(!g->active)
+		return -1;
 	if(g->inlen < 1)
 		return -1;
 	if(g->inlen == 1)
@@ -132,6 +144,8 @@ void
 polarize(Gate* g)
 {
 	int i;
+	if(!g->active)
+		return;
 	if(g->type == OUTPUT) {
 		int newpolarity = getpolarity(g);
 		if(newpolarity != -1 && g->polarity != newpolarity)
@@ -147,7 +161,7 @@ void
 bang(Gate* g, int depth)
 {
 	int i, a = depth - 1;
-	if(a < 1 || !g)
+	if(a < 1 || !g || !g->active)
 		return;
 	polarize(g);
 	for(i = 0; i < g->outlen; ++i)
@@ -157,6 +171,7 @@ bang(Gate* g, int depth)
 void
 destroy(void)
 {
+	/*
 	int i;
 	if(arena.gates_len <= 22)
 		return;
@@ -168,6 +183,7 @@ destroy(void)
 			arena.wires[i].active = 0;
 	}
 	arena.gates_len--;
+	*/
 }
 
 /* Wiring */
@@ -177,22 +193,18 @@ extendwire(Wire* c, Brush* b)
 {
 	if(c->len >= CABLEMAX)
 		return;
-	if(c->len == 0 || (c->len > 0 && distance(c->points[c->len - 1].x, c->points[c->len - 1].y, b->x, b->y) > 20)) {
-		c->points[c->len].x = b->x;
-		c->points[c->len].y = b->y;
-		c->len++;
-	}
+	if(c->len == 0 || (c->len > 0 && distance(c->points[c->len - 1].x, c->points[c->len - 1].y, b->pos.x, b->pos.y) > 20))
+		setpt2d(&c->points[c->len++], b->pos.x, b->pos.y);
 }
 
 void
 beginwire(Wire* c, Brush* b)
 {
-	Gate* gate = findgateat(&arena, b->x, b->y);
+	Gate* gate = findgateat(&arena, b->pos.x, b->pos.y);
 	b->wire.active = 1;
 	if(gate) {
 		b->wire.polarity = gate->polarity;
-		b->x = gate->pos.x;
-		b->y = gate->pos.y;
+		setpt2d(&b->pos, gate->pos.x, gate->pos.y);
 	}
 	c->len = 0;
 	extendwire(c, b);
@@ -217,19 +229,18 @@ endwire(Wire* c, Brush* b)
 	gatefrom = findgateat(&arena, c->points[0].x, c->points[0].y);
 	if(!gatefrom)
 		return abandon(c, b);
-	gateto = findgateat(&arena, b->x, b->y);
+	gateto = findgateat(&arena, b->pos.x, b->pos.y);
 	if(!gateto)
 		return abandon(c, b);
 	if(!gateto->type)
 		return abandon(c, b);
 	if(gatefrom == gateto)
 		return abandon(c, b);
-	if(gatefrom->outlen >= ROUTEMAX)
+	if(gatefrom->outlen >= PORTMAX)
 		return abandon(c, b);
-	if(gateto->inlen >= ROUTEMAX)
+	if(gateto->inlen >= PORTMAX)
 		return abandon(c, b);
-	b->x = gateto->pos.x;
-	b->y = gateto->pos.y;
+	setpt2d(&b->pos, gateto->pos.x, gateto->pos.y);
 	extendwire(c, b);
 	/* copy */
 	newwire = &arena.wires[arena.wires_len];
@@ -254,8 +265,8 @@ endwire(Wire* c, Brush* b)
 Gate*
 addgate(Arena* a, GateType type, int polarity, int x, int y)
 {
-	Gate* g = &a->gates[a->gates_len++];
-	g->id = a->gates_len;
+	Gate* g = availgate(a);
+	printf("Created gate #%d(%d) \n", g->id, type);
 	g->active = 1;
 	g->polarity = polarity;
 	g->value = 0;
@@ -310,12 +321,6 @@ circle(uint32_t* dst, int ax, int ay, int r, int color)
 }
 
 void
-update(void)
-{
-	SDL_SetWindowTitle(gWindow, "Noton");
-}
-
-void
 drawwire(uint32_t* dst, Wire* c, int color)
 {
 	int i;
@@ -334,6 +339,8 @@ void
 drawgate(uint32_t* dst, Gate* g)
 {
 	int r = 17;
+	if(!g->active)
+		return;
 	circle(dst, g->pos.x, g->pos.y, r, g->polarity == 1 ? color4 : g->polarity == 0 ? color0 : color3);
 	if(g->type == OUTPUT) {
 		pixel(dst, g->pos.x - 1, g->pos.y, color1);
@@ -358,7 +365,7 @@ redraw(uint32_t* dst, Brush* b)
 {
 	int i;
 	clear();
-	for(i = 0; i < arena.gates_len; i++)
+	for(i = 0; i < GATEMAX; i++)
 		drawgate(dst, &arena.gates[i]);
 	for(i = 0; i < arena.wires_len; i++)
 		drawwire(dst, &arena.wires[i], color2);
@@ -383,7 +390,7 @@ run(uint32_t* dst, Brush* b)
 	arena.inputs[3]->polarity = (arena.frame / 8) % 4 == 1;
 	arena.inputs[5]->polarity = (arena.frame / 8) % 4 == 2;
 	arena.inputs[7]->polarity = (arena.frame / 8) % 4 == 3;
-	for(i = 0; i < arena.gates_len; ++i)
+	for(i = 0; i < GATEMAX; ++i)
 		bang(&arena.gates[i], 10);
 	redraw(dst, b);
 	arena.frame++;
@@ -437,8 +444,9 @@ domouse(SDL_Event* event, Brush* b)
 {
 	switch(event->type) {
 	case SDL_MOUSEBUTTONDOWN:
-		b->x = (event->motion.x - (PAD * ZOOM)) / ZOOM;
-		b->y = (event->motion.y - (PAD * ZOOM)) / ZOOM;
+		setpt2d(&b->pos,
+		        (event->motion.x - (PAD * ZOOM)) / ZOOM,
+		        (event->motion.y - (PAD * ZOOM)) / ZOOM);
 		if(event->button.button == SDL_BUTTON_RIGHT)
 			break;
 		b->down = 1;
@@ -449,17 +457,19 @@ domouse(SDL_Event* event, Brush* b)
 		if(event->button.button == SDL_BUTTON_RIGHT)
 			break;
 		if(b->down) {
-			b->x = (event->motion.x - (PAD * ZOOM)) / ZOOM;
-			b->y = (event->motion.y - (PAD * ZOOM)) / ZOOM;
+			setpt2d(&b->pos,
+			        (event->motion.x - (PAD * ZOOM)) / ZOOM,
+			        (event->motion.y - (PAD * ZOOM)) / ZOOM);
 			extendwire(&b->wire, b);
 			redraw(pixels, b);
 		}
 		break;
 	case SDL_MOUSEBUTTONUP:
-		b->x = (event->motion.x - (PAD * ZOOM)) / ZOOM;
-		b->y = (event->motion.y - (PAD * ZOOM)) / ZOOM;
+		setpt2d(&b->pos,
+		        (event->motion.x - (PAD * ZOOM)) / ZOOM,
+		        (event->motion.y - (PAD * ZOOM)) / ZOOM);
 		if(event->button.button == SDL_BUTTON_RIGHT) {
-			addgate(&arena, XOR, -1, b->x, b->y);
+			addgate(&arena, XOR, -1, b->pos.x, b->pos.y);
 			redraw(pixels, b);
 			break;
 		}
@@ -479,16 +489,15 @@ dokey(SDL_Event* event, Brush* b)
 		quit();
 		break;
 	case SDLK_n:
-		arena.gates_len = 22;
-		arena.wires_len = 0;
+		/* TODO */
 		redraw(pixels, b);
 		break;
 	case SDLK_BACKSPACE:
+		/* TODO */
 		destroy();
 		redraw(pixels, b);
 		break;
 	}
-	update();
 }
 
 void
@@ -546,12 +555,10 @@ main(int argc, char** argv)
 	brush.down = 0;
 	brush.wire.active = 0;
 
-	setup();
-
 	if(!init())
 		return error("Init", "Failure");
 
-	update();
+	setup();
 
 	while(1) {
 		SDL_Event event;
