@@ -17,6 +17,9 @@
 #define WIREMAX 128
 #define PORTMAX 8
 
+#define INPUTLEN 8
+#define OUTPUTLEN 12
+
 #define CABLEMAX 128
 #define SPEED 40
 #define OCTAVE 36
@@ -47,12 +50,12 @@ typedef struct Arena {
 	int frame;
 	Gate gates[GATEMAX];
 	Wire wires[WIREMAX];
-	Gate *inputs[8], *outputs[12];
+	Gate *inputs[INPUTLEN], *outputs[OUTPUTLEN];
 } Arena;
 
 typedef struct Brush {
-	Point2d pos;
 	int down;
+	Point2d pos;
 	Wire wire;
 } Brush;
 
@@ -147,16 +150,14 @@ int
 getpolarity(Gate* g)
 {
 	int i;
-	if(!g->active)
+	if(!g->active || g->inlen < 1)
 		return -1;
-	if(g->inlen < 1)
-		return -1;
+	/* TODO: Ignore inactive wires */
 	if(g->inlen == 1)
 		return g->inputs[0]->polarity;
-	for(i = 0; i < g->inlen; i++) {
+	for(i = 0; i < g->inlen; i++)
 		if(g->inputs[i]->polarity != g->inputs[0]->polarity)
 			return 0;
-	}
 	return 1;
 }
 
@@ -188,37 +189,21 @@ bang(Gate* g, int depth)
 		bang(findgateid(&arena, g->outputs[i]->b), a);
 }
 
-void
-destroy(Arena* a)
-{
-	int i;
-	for(i = GATEMAX - 1; i >= 0; --i) {
-		if(!a->gates[i].active)
-			continue;
-		if(a->gates[i].locked)
-			continue;
-		a->gates[i].active = 0;
-		return;
-	}
-	printf("Nothing to erase\n");
-}
-
-/* Wiring */
+/* Add/Remove */
 
 Wire*
 addwire(Arena* a, Wire* temp, Gate* from, Gate* to)
 {
 	int i;
 	Wire* w = availwire(a);
-	printf("Created wire #%d(#%d->#%d) \n", w->id, from->id, to->id);
+	printf("Added wire #%d(#%d->#%d) \n", w->id, from->id, to->id);
 	w->active = 1;
 	w->polarity = -1;
 	w->a = from->id;
 	w->b = to->id;
-	for(i = 0; i < temp->len; i++) {
-		setpt2d(&w->points[i], temp->points[i].x, temp->points[i].y);
-		w->len++;
-	}
+	w->len = 0;
+	for(i = 0; i < temp->len; i++)
+		setpt2d(&w->points[w->len++], temp->points[i].x, temp->points[i].y);
 	return w;
 }
 
@@ -226,7 +211,7 @@ Gate*
 addgate(Arena* a, GateType type, int polarity, Point2d pos)
 {
 	Gate* g = availgate(a);
-	printf("Created gate #%d(%d) \n", g->id, type);
+	printf("Added gate #%d \n", g->id);
 	g->active = 1;
 	g->polarity = polarity;
 	g->value = 0;
@@ -237,17 +222,20 @@ addgate(Arena* a, GateType type, int polarity, Point2d pos)
 	return g;
 }
 
+/* Wiring */
+
 void
-extendwire(Wire* c, Brush* b)
+extendwire(Brush* b)
 {
-	if(c->len >= CABLEMAX)
+	if(b->wire.len >= CABLEMAX)
 		return;
-	if(c->len == 0 || (c->len > 0 && distance(c->points[c->len - 1], b->pos) > 20))
-		setpt2d(&c->points[c->len++], b->pos.x, b->pos.y);
+	if(b->wire.len > 0 && distance(b->wire.points[b->wire.len - 1], b->pos) < 20)
+		return;
+	setpt2d(&b->wire.points[b->wire.len++], b->pos.x, b->pos.y);
 }
 
 void
-beginwire(Wire* c, Brush* b)
+beginwire(Brush* b)
 {
 	Gate* gate = findgateat(&arena, b->pos);
 	b->wire.active = 1;
@@ -255,48 +243,48 @@ beginwire(Wire* c, Brush* b)
 		b->wire.polarity = gate->polarity;
 		setpt2d(&b->pos, gate->pos.x, gate->pos.y);
 	}
-	c->len = 0;
-	extendwire(c, b);
+	b->wire.len = 0;
+	extendwire(b);
 }
 
 int
-abandon(Wire* c, Brush* b)
+abandon(Brush* b)
 {
-	c->len = 0;
+	b->wire.len = 0;
 	b->wire.active = 0;
 	return 0;
 }
 
 int
-endwire(Wire* c, Brush* b)
+endwire(Brush* b)
 {
 	Wire* newwire;
 	Gate *gatefrom, *gateto;
-	if(c->len < 1)
-		return abandon(c, b);
-	gatefrom = findgateat(&arena, c->points[0]);
+	if(b->wire.len < 1)
+		return abandon(b);
+	gatefrom = findgateat(&arena, b->wire.points[0]);
 	if(!gatefrom)
-		return abandon(c, b);
+		return abandon(b);
 	gateto = findgateat(&arena, b->pos);
 	if(!gateto)
-		return abandon(c, b);
+		return abandon(b);
 	if(!gateto->type)
-		return abandon(c, b);
+		return abandon(b);
 	if(gatefrom == gateto)
-		return abandon(c, b);
+		return abandon(b);
 	if(gatefrom->outlen >= PORTMAX)
-		return abandon(c, b);
+		return abandon(b);
 	if(gateto->inlen >= PORTMAX)
-		return abandon(c, b);
+		return abandon(b);
 	setpt2d(&b->pos, gateto->pos.x, gateto->pos.y);
-	extendwire(c, b);
+	extendwire(b);
 	/* copy */
-	newwire = addwire(&arena, c, gatefrom, gateto);
+	newwire = addwire(&arena, &b->wire, gatefrom, gateto);
 	/* connect */
 	gatefrom->outputs[gatefrom->outlen++] = newwire;
 	gateto->inputs[gateto->inlen++] = newwire;
 	polarize(gateto);
-	return abandon(c, b);
+	return abandon(b);
 }
 
 /* draw */
@@ -400,6 +388,8 @@ redraw(uint32_t* dst, Brush* b)
 	SDL_RenderPresent(gRenderer);
 }
 
+/* operation */
+
 void
 run(void)
 {
@@ -422,11 +412,11 @@ setup(void)
 {
 	int i;
 	Gate *gtrue, *gfalse;
-	for(i = 0; i < 8; ++i) {
+	for(i = 0; i < INPUTLEN; ++i) {
 		arena.inputs[i] = addgate(&arena, INPUT, 0, Pt2d(i % 2 == 0 ? 26 : 20, 30 + i * 6));
 		arena.inputs[i]->locked = 1;
 	}
-	for(i = 0; i < 12; ++i) {
+	for(i = 0; i < OUTPUTLEN; ++i) {
 		arena.outputs[i] = addgate(&arena, OUTPUT, 0, Pt2d(WIDTH - (i % 2 == 0 ? 46 : 40), 30 + i * 6));
 		arena.outputs[i]->locked = 1;
 		arena.outputs[i]->value = i;
@@ -472,7 +462,7 @@ domouse(SDL_Event* event, Brush* b)
 		if(event->button.button == SDL_BUTTON_RIGHT)
 			break;
 		b->down = 1;
-		beginwire(&b->wire, b);
+		beginwire(b);
 		redraw(pixels, b);
 		break;
 	case SDL_MOUSEMOTION:
@@ -482,7 +472,7 @@ domouse(SDL_Event* event, Brush* b)
 			setpt2d(&b->pos,
 			        (event->motion.x - (PAD * ZOOM)) / ZOOM,
 			        (event->motion.y - (PAD * ZOOM)) / ZOOM);
-			extendwire(&b->wire, b);
+			extendwire(b);
 			redraw(pixels, b);
 		}
 		break;
@@ -497,7 +487,7 @@ domouse(SDL_Event* event, Brush* b)
 			break;
 		}
 		b->down = 0;
-		endwire(&b->wire, b);
+		endwire(b);
 		redraw(pixels, b);
 		break;
 	}
@@ -517,7 +507,6 @@ dokey(SDL_Event* event, Brush* b)
 		break;
 	case SDLK_BACKSPACE:
 		/* TODO */
-		destroy(&arena);
 		redraw(pixels, b);
 		break;
 	}
