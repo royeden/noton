@@ -17,8 +17,8 @@ cc noton.c -std=c89 -Os -DNDEBUG -g0 -s -Wall -L/usr/local/lib -lSDL2 -lportmidi
 - `BACKSPACE` Erase
 - `SPACE` Toggle play
 - `1-9` Select channel
-- `<` Octave down(TODO)
-- `>` Octave up(TODO)
+- `<` Octave down
+- `>` Octave up
 
 ### Paint
 
@@ -29,4 +29,3 @@ cc noton.c -std=c89 -Os -DNDEBUG -g0 -s -Wall -L/usr/local/lib -lSDL2 -lportmidi
 
 - Don't change polarity twice per frame.
 - export image
-- add change octave shortcut

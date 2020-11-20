@@ -187,10 +187,17 @@ bang(Gate *g, int depth)
 /* Options */
 
 void
-select(Noton *n, int channel)
+modchan(Noton *n, int channel)
 {
 	n->channel = channel;
 	printf("Select channel #%d\n", channel);
+}
+
+void
+modoct(Noton *n, int mod)
+{
+	n->octave += mod;
+	printf("Select octave #%d\n", mod);
 }
 
 void
@@ -448,7 +455,7 @@ setup(Noton *n)
 			n->outputs[j] = addgate(n, OUTPUT, 0, Pt2d(x, 30 + j * 6));
 			n->outputs[j]->locked = 1;
 			n->outputs[j]->note = j + (i % 2 * 24);
-			n->outputs[j]->chan = i;
+			n->outputs[j]->chan = n->channel + i;
 			n->outputs[j]->shrp = sharps[abs(n->outputs[j]->note) % 12];
 		}
 	}
@@ -533,15 +540,17 @@ dokey(Noton *n, SDL_Event *event, Brush *b)
 	case SDLK_ESCAPE: quit(); break;
 	case SDLK_BACKSPACE: destroy(n); break;
 	case SDLK_SPACE: toggle(n); break;
-	case SDLK_1: select(n, 0); break;
-	case SDLK_2: select(n, 1); break;
-	case SDLK_3: select(n, 2); break;
-	case SDLK_4: select(n, 3); break;
-	case SDLK_5: select(n, 4); break;
-	case SDLK_6: select(n, 5); break;
-	case SDLK_7: select(n, 6); break;
-	case SDLK_8: select(n, 7); break;
-	case SDLK_9: select(n, 8); break;
+	case SDLK_LESS: modoct(n, -1); break;
+	case SDLK_GREATER: modoct(n, 1); break;
+	case SDLK_1: modchan(n, 0); break;
+	case SDLK_2: modchan(n, 1); break;
+	case SDLK_3: modchan(n, 2); break;
+	case SDLK_4: modchan(n, 3); break;
+	case SDLK_5: modchan(n, 4); break;
+	case SDLK_6: modchan(n, 5); break;
+	case SDLK_7: modchan(n, 6); break;
+	case SDLK_8: modchan(n, 7); break;
+	case SDLK_9: modchan(n, 8); break;
 	}
 }
 
