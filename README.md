@@ -10,7 +10,11 @@ To build [noton](https://wiki.xxiivv.com/noton), you must have [SDL2](https://wi
 
 ### General
 
-- `BACKSPACE` Erase last stroke
+- `BACKSPACE` Erase last stroke(TODO)
+- `SPACE` Toggle play/pause
+- `1-9` Select channel
+- `<` Octave down(TODO)
+- `>` Octave up(TODO)
 
 ### Paint
 
@@ -24,7 +28,7 @@ To build [noton](https://wiki.xxiivv.com/noton), you must have [SDL2](https://wi
 - Consider changing output to 1 note of 8 bits instead of 12 notes.
 - flag deleted nodes and wires
 - export image
-- colorize piano notes
+- add change octave shortcut
 
 ## Notes
 

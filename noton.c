@@ -15,14 +15,10 @@
 
 #define GATEMAX 64
 #define WIREMAX 128
+#define WIREPTMAX 128
 #define PORTMAX 32
-
-#define INPUTLEN 8
-#define OUTPUTLEN 12
-
-#define CABLEMAX 128
-#define SPEED 40
-#define OCTAVE 36
+#define INPUTMAX 8
+#define OUTPUTMAX 12
 
 typedef enum {
 	INPUT,
@@ -36,7 +32,7 @@ typedef struct {
 
 typedef struct Wire {
 	int id, active, polarity, a, b, len;
-	Point2d points[CABLEMAX];
+	Point2d points[WIREPTMAX];
 } Wire;
 
 typedef struct Gate {
@@ -47,12 +43,12 @@ typedef struct Gate {
 	Wire *inputs[PORTMAX], *outputs[PORTMAX];
 } Gate;
 
-typedef struct Arena {
-	int frame;
+typedef struct Noton {
+	unsigned int alive, frame, speed, channel, octave;
 	Gate gates[GATEMAX];
 	Wire wires[WIREMAX];
-	Gate *inputs[INPUTLEN], *outputs[OUTPUTLEN];
-} Arena;
+	Gate *inputs[INPUTMAX], *outputs[OUTPUTMAX];
+} Noton;
 
 typedef struct Brush {
 	int down;
@@ -62,12 +58,11 @@ typedef struct Brush {
 
 int WIDTH = 8 * HOR + PAD * 2;
 int HEIGHT = 8 * VER + PAD * 2;
-int INSTR = 0;
 SDL_Window* gWindow = NULL;
 SDL_Renderer* gRenderer = NULL;
 SDL_Texture* gTexture = NULL;
 uint32_t* pixels;
-Arena arena;
+Noton noton;
 PmStream* midi;
 
 /* helpers */
@@ -95,53 +90,72 @@ Pt2d(int x, int y)
 }
 
 void
-playnote(int chan, int note, int z)
+play(int channel, int octave, int note, int z)
 {
 	Pm_WriteShort(midi,
 	              Pt_Time(),
-	              Pm_Message(0x90 + chan + INSTR, OCTAVE + note, z ? 100 : 0));
+	              Pm_Message(0x90 + channel, (octave * 12) + note, z ? 100 : 0));
+}
+
+void
+select(Noton* n, int channel)
+{
+	printf("Select channel #%d\n", channel);
+	n->channel = channel;
+}
+
+void
+destroy(Noton* n)
+{
+	/* TODO */
+}
+
+void
+toggle(Noton* n)
+{
+	n->alive = !n->alive;
 }
 
 Gate*
-findgateid(Arena* a, int id)
+findgateid(Noton* n, int id)
 {
 	if(id < 0 || id >= GATEMAX)
 		return NULL;
-	if(!&a->gates[id] || !a->gates[id].active)
+	if(!&n->gates[id] || !n->gates[id].active)
 		return NULL;
-	return &a->gates[id];
+	return &n->gates[id];
 }
 
 Gate*
-availgate(Arena* a)
+availgate(Noton* n)
 {
 	int i;
 	for(i = 0; i < GATEMAX; ++i)
-		if(!a->gates[i].active) {
-			a->gates[i].id = i;
-			return &a->gates[i];
+		if(!n->gates[i].active) {
+			n->gates[i].id = i;
+			return &n->gates[i];
 		}
 	return NULL;
 }
 
 Wire*
-availwire(Arena* a)
+availwire(Noton* n)
 {
 	int i;
 	for(i = 0; i < WIREMAX; ++i)
-		if(!a->wires[i].active) {
-			a->wires[i].id = i;
-			return &a->wires[i];
+		if(!n->wires[i].active) {
+			n->wires[i].id = i;
+			return &n->wires[i];
 		}
 	return NULL;
 }
 
 Gate*
-findgateat(Arena* a, Point2d pos)
+findgateat(Noton* n, Point2d pos)
 {
 	int i;
 	for(i = 0; i < GATEMAX; ++i) {
-		Gate* g = &a->gates[i];
+		Gate* g = &n->gates[i];
 		if(g->active && distance(pos, g->pos) < 50)
 			return g;
 	}
@@ -172,7 +186,7 @@ polarize(Gate* g)
 	if(g->type == OUTPUT) {
 		int newpolarity = getpolarity(g);
 		if(newpolarity != -1 && g->polarity != newpolarity)
-			playnote(g->chan, g->note, newpolarity);
+			play(noton.channel, noton.octave, g->note, newpolarity);
 		g->polarity = newpolarity;
 	} else if(g->type)
 		g->polarity = getpolarity(g);
@@ -188,17 +202,17 @@ bang(Gate* g, int depth)
 		return;
 	polarize(g);
 	for(i = 0; i < g->outlen; ++i)
-		bang(findgateid(&arena, g->outputs[i]->b), a);
+		bang(findgateid(&noton, g->outputs[i]->b), a);
 }
 
 /* Add/Remove */
 
 Wire*
-addwire(Arena* a, Wire* temp, Gate* from, Gate* to)
+addwire(Noton* n, Wire* temp, Gate* from, Gate* to)
 {
 	int i;
-	Wire* w = availwire(a);
-	printf("Added wire #%d(#%d->#%d) \n", w->id, from->id, to->id);
+	Wire* w = availwire(n);
+	printf("Add wire #%d(#%d->#%d) \n", w->id, from->id, to->id);
 	w->active = 1;
 	w->polarity = -1;
 	w->a = from->id;
@@ -210,10 +224,10 @@ addwire(Arena* a, Wire* temp, Gate* from, Gate* to)
 }
 
 Gate*
-addgate(Arena* a, GateType type, int polarity, Point2d pos)
+addgate(Noton* n, GateType type, int polarity, Point2d pos)
 {
-	Gate* g = availgate(a);
-	printf("Added gate #%d \n", g->id);
+	Gate* g = availgate(n);
+	printf("Add gate #%d \n", g->id);
 	g->active = 1;
 	g->polarity = polarity;
 	g->chan = 0;
@@ -231,7 +245,7 @@ addgate(Arena* a, GateType type, int polarity, Point2d pos)
 void
 extendwire(Brush* b)
 {
-	if(b->wire.len >= CABLEMAX)
+	if(b->wire.len >= WIREPTMAX)
 		return;
 	if(b->wire.len > 0 && distance(b->wire.points[b->wire.len - 1], b->pos) < 20)
 		return;
@@ -241,7 +255,7 @@ extendwire(Brush* b)
 void
 beginwire(Brush* b)
 {
-	Gate* gate = findgateat(&arena, b->pos);
+	Gate* gate = findgateat(&noton, b->pos);
 	b->wire.active = 1;
 	b->wire.polarity = -1;
 	if(gate) {
@@ -267,10 +281,10 @@ endwire(Brush* b)
 	Gate *gatefrom, *gateto;
 	if(b->wire.len < 1)
 		return abandon(b);
-	gatefrom = findgateat(&arena, b->wire.points[0]);
+	gatefrom = findgateat(&noton, b->wire.points[0]);
 	if(!gatefrom)
 		return abandon(b);
-	gateto = findgateat(&arena, b->pos);
+	gateto = findgateat(&noton, b->pos);
 	if(!gateto)
 		return abandon(b);
 	if(!gateto->type)
@@ -284,7 +298,7 @@ endwire(Brush* b)
 	setpt2d(&b->pos, gateto->pos.x, gateto->pos.y);
 	extendwire(b);
 	/* copy */
-	newwire = addwire(&arena, &b->wire, gatefrom, gateto);
+	newwire = addwire(&noton, &b->wire, gatefrom, gateto);
 	/* connect */
 	gatefrom->outputs[gatefrom->outlen++] = newwire;
 	gateto->inputs[gateto->inlen++] = newwire;
@@ -345,7 +359,7 @@ drawwire(uint32_t* dst, Wire* w, int color)
 		Point2d* p2 = &w->points[i + 1];
 		if(p2) {
 			line(dst, p1.x, p1.y, p2->x, p2->y, color);
-			if((arena.frame / 3) % w->len != i)
+			if((int)(noton.frame / 3) % w->len != i)
 				line(dst, p1.x, p1.y, p2->x, p2->y, w->polarity == 1 ? color4 : !w->polarity ? color0 : color3);
 		}
 	}
@@ -382,9 +396,9 @@ redraw(uint32_t* dst, Brush* b)
 	int i;
 	clear(dst);
 	for(i = 0; i < GATEMAX; i++)
-		drawgate(dst, &arena.gates[i]);
+		drawgate(dst, &noton.gates[i]);
 	for(i = 0; i < WIREMAX; i++)
-		drawwire(dst, &arena.wires[i], color2);
+		drawwire(dst, &noton.wires[i], color2);
 	if(b->wire.active)
 		drawwire(dst, &b->wire, color3);
 	SDL_UpdateTexture(gTexture, NULL, dst, WIDTH * sizeof(uint32_t));
@@ -396,20 +410,20 @@ redraw(uint32_t* dst, Brush* b)
 /* operation */
 
 void
-run(void)
+run(Noton* n)
 {
 	int i;
-	arena.inputs[0]->polarity = (arena.frame / 4) % 2;
-	arena.inputs[2]->polarity = (arena.frame / 8) % 2;
-	arena.inputs[4]->polarity = (arena.frame / 16) % 2;
-	arena.inputs[6]->polarity = (arena.frame / 32) % 2;
-	arena.inputs[1]->polarity = (arena.frame / 8) % 4 == 0;
-	arena.inputs[3]->polarity = (arena.frame / 8) % 4 == 1;
-	arena.inputs[5]->polarity = (arena.frame / 8) % 4 == 2;
-	arena.inputs[7]->polarity = (arena.frame / 8) % 4 == 3;
+	n->inputs[0]->polarity = (n->frame / 4) % 2;
+	n->inputs[2]->polarity = (n->frame / 8) % 2;
+	n->inputs[4]->polarity = (n->frame / 16) % 2;
+	n->inputs[6]->polarity = (n->frame / 32) % 2;
+	n->inputs[1]->polarity = (n->frame / 8) % 4 == 0;
+	n->inputs[3]->polarity = (n->frame / 8) % 4 == 1;
+	n->inputs[5]->polarity = (n->frame / 8) % 4 == 2;
+	n->inputs[7]->polarity = (n->frame / 8) % 4 == 3;
 	for(i = 0; i < GATEMAX; ++i)
-		bang(&arena.gates[i], 10);
-	arena.frame++;
+		bang(&n->gates[i], 10);
+	n->frame++;
 }
 
 void
@@ -418,27 +432,27 @@ setup(void)
 	int i;
 	Gate *gtrue, *gfalse;
 	int octave[12] = {0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0};
-	for(i = 0; i < INPUTLEN; ++i) {
-		arena.inputs[i] = addgate(&arena, INPUT, 0, Pt2d(i % 2 == 0 ? 27 : 20, 30 + i * 6));
-		arena.inputs[i]->locked = 1;
+	for(i = 0; i < INPUTMAX; ++i) {
+		noton.inputs[i] = addgate(&noton, INPUT, 0, Pt2d(i % 2 == 0 ? 27 : 20, 30 + i * 6));
+		noton.inputs[i]->locked = 1;
 	}
-	for(i = 0; i < OUTPUTLEN; ++i) {
-		arena.outputs[i] = addgate(&arena, OUTPUT, 0, Pt2d(WIDTH - (i % 2 == 0 ? 61 : 54), 30 + i * 6));
-		arena.outputs[i]->locked = 1;
-		arena.outputs[i]->note = i - 12;
-		arena.outputs[i]->chan = 0;
-		arena.outputs[i]->shrp = octave[abs(arena.outputs[i]->note) % 12];
+	for(i = 0; i < OUTPUTMAX; ++i) {
+		noton.outputs[i] = addgate(&noton, OUTPUT, 0, Pt2d(WIDTH - (i % 2 == 0 ? 61 : 54), 30 + i * 6));
+		noton.outputs[i]->locked = 1;
+		noton.outputs[i]->note = i;
+		noton.outputs[i]->chan = 0;
+		noton.outputs[i]->shrp = octave[abs(noton.outputs[i]->note) % 12];
 	}
-	for(i = 0; i < OUTPUTLEN; ++i) {
-		arena.outputs[i] = addgate(&arena, OUTPUT, 0, Pt2d(WIDTH - (i % 2 == 0 ? 47 : 40), 30 + i * 6));
-		arena.outputs[i]->locked = 1;
-		arena.outputs[i]->note = i + 24;
-		arena.outputs[i]->chan = 1;
-		arena.outputs[i]->shrp = octave[abs(arena.outputs[i]->note) % 12];
+	for(i = 0; i < OUTPUTMAX; ++i) {
+		noton.outputs[i] = addgate(&noton, OUTPUT, 0, Pt2d(WIDTH - (i % 2 == 0 ? 47 : 40), 30 + i * 6));
+		noton.outputs[i]->locked = 1;
+		noton.outputs[i]->note = i + 24;
+		noton.outputs[i]->chan = 0;
+		noton.outputs[i]->shrp = octave[abs(noton.outputs[i]->note) % 12];
 	}
-	gfalse = addgate(&arena, INPUT, 0, Pt2d((10 % 2 == 0 ? 26 : 20), 30 + 10 * 6));
+	gfalse = addgate(&noton, INPUT, 0, Pt2d((10 % 2 == 0 ? 26 : 20), 30 + 10 * 6));
 	gfalse->locked = 1;
-	gtrue = addgate(&arena, INPUT, 1, Pt2d((11 % 2 == 0 ? 26 : 20), 30 + 11 * 6));
+	gtrue = addgate(&noton, INPUT, 1, Pt2d((11 % 2 == 0 ? 26 : 20), 30 + 11 * 6));
 	gtrue->locked = 1;
 }
 
@@ -496,8 +510,8 @@ domouse(SDL_Event* event, Brush* b)
 		        (event->motion.x - (PAD * ZOOM)) / ZOOM,
 		        (event->motion.y - (PAD * ZOOM)) / ZOOM);
 		if(event->button.button == SDL_BUTTON_RIGHT) {
-			if(!findgateat(&arena, b->pos))
-				addgate(&arena, XOR, -1, b->pos);
+			if(!findgateat(&noton, b->pos))
+				addgate(&noton, XOR, -1, b->pos);
 			redraw(pixels, b);
 			break;
 		}
@@ -509,35 +523,48 @@ domouse(SDL_Event* event, Brush* b)
 }
 
 void
-dokey(SDL_Event* event, Brush* b)
+dokey(Noton* n, SDL_Event* event, Brush* b)
 {
 	/* int shift = SDL_GetModState() & KMOD_LSHIFT || SDL_GetModState() & KMOD_RSHIFT; */
 	switch(event->key.keysym.sym) {
 	case SDLK_ESCAPE:
 		quit();
 		break;
-	case SDLK_n:
-		/* TODO */
+	case SDLK_BACKSPACE:
 		redraw(pixels, b);
+		break;
+	case SDLK_SPACE:
+		toggle(n);
+		break;
+	case SDLK_n:
+		destroy(n);
 		break;
 	case SDLK_1:
-		INSTR = 0;
+		select(n, 0);
 		break;
 	case SDLK_2:
-		INSTR = 1;
+		select(n, 1);
 		break;
 	case SDLK_3:
-		INSTR = 2;
+		select(n, 2);
 		break;
 	case SDLK_4:
-		INSTR = 3;
+		select(n, 3);
 		break;
 	case SDLK_5:
-		INSTR = 4;
+		select(n, 4);
 		break;
-	case SDLK_BACKSPACE:
-		/* TODO */
-		redraw(pixels, b);
+	case SDLK_6:
+		select(n, 5);
+		break;
+	case SDLK_7:
+		select(n, 6);
+		break;
+	case SDLK_8:
+		select(n, 7);
+		break;
+	case SDLK_9:
+		select(n, 8);
 		break;
 	}
 }
@@ -597,6 +624,11 @@ main(int argc, char** argv)
 	brush.down = 0;
 	brush.wire.active = 0;
 
+	noton.alive = 1;
+	noton.speed = 40;
+	noton.channel = 0;
+	noton.octave = 3;
+
 	if(!init())
 		return error("Init", "Failure");
 
@@ -609,15 +641,18 @@ main(int argc, char** argv)
 		else
 			delta = endtime - begintime;
 
-		if(delta < SPEED)
-			SDL_Delay(SPEED - delta);
-		if(delta > SPEED)
+		if(delta < noton.speed)
+			SDL_Delay(noton.speed - delta);
+		if(delta > noton.speed)
 			fps = 1000 / delta;
 		if(fps < 15)
 			printf("Slowdown: %ifps\n", fps);
 
-		run();
-		redraw(pixels, &brush);
+		if(noton.alive) {
+			printf("%d\n", noton.alive);
+			run(&noton);
+			redraw(pixels, &brush);
+		}
 
 		while(SDL_PollEvent(&event) != 0) {
 			if(event.type == SDL_QUIT)
@@ -627,7 +662,7 @@ main(int argc, char** argv)
 			        event.type == SDL_MOUSEMOTION) {
 				domouse(&event, &brush);
 			} else if(event.type == SDL_KEYDOWN)
-				dokey(&event, &brush);
+				dokey(&noton, &event, &brush);
 			else if(event.type == SDL_WINDOWEVENT)
 				if(event.window.event == SDL_WINDOWEVENT_EXPOSED)
 					redraw(pixels, &brush);
