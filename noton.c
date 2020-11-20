@@ -40,7 +40,7 @@ typedef struct Wire {
 
 typedef struct Gate {
 	int id, polarity, locked, inlen, outlen;
-	int chan, note, shrp;
+	int channel, note, shrp;
 	Point2d pos;
 	GateType type;
 	Wire *inputs[PORTMAX], *outputs[PORTMAX];
@@ -164,7 +164,7 @@ polarize(Gate *g)
 	if(g->type == OUTPUT) {
 		int newpolarity = getpolarity(g);
 		if(newpolarity != -1 && g->polarity != newpolarity)
-			playmidi(noton.channel, noton.octave, g->note, newpolarity);
+			playmidi(noton.channel + g->channel, noton.octave, g->note, newpolarity);
 		g->polarity = newpolarity;
 	} else if(g->type)
 		g->polarity = getpolarity(g);
@@ -190,14 +190,14 @@ void
 modchan(Noton *n, int channel)
 {
 	n->channel = channel;
-	printf("Select channel #%d\n", channel);
+	printf("Select channel #%d\n", n->channel);
 }
 
 void
 modoct(Noton *n, int mod)
 {
 	n->octave += mod;
-	printf("Select octave #%d\n", mod);
+	printf("Select octave #%d\n", n->octave);
 }
 
 void
@@ -216,10 +216,10 @@ destroy(Noton *n)
 		n->wlen--;
 	}
 	for(i = 0; i < n->glen; i++) {
-		if(n->gates[i].locked)
-			continue;
 		n->gates[i].inlen = 0;
 		n->gates[i].outlen = 0;
+		if(n->gates[i].locked)
+			continue;
 		n->glen--;
 	}
 	n->alive = 1;
@@ -249,7 +249,7 @@ addgate(Noton *n, GateType type, int polarity, Point2d pos)
 	Gate *g = &n->gates[n->glen];
 	g->id = n->glen++;
 	g->polarity = polarity;
-	g->chan = 0;
+	g->channel = 0;
 	g->note = 0;
 	g->shrp = 0;
 	g->inlen = 0;
@@ -447,15 +447,13 @@ setup(Noton *n)
 		n->inputs[i]->locked = 1;
 	}
 
-	/* 61:54 47:40 */
-
 	for(i = 0; i < CHANNELS; ++i) {
 		for(j = 0; j < OUTPUTMAX; ++j) {
 			int x = WIDTH - (j % 2 == 0 ? 47 : 40) - (i * 15);
 			n->outputs[j] = addgate(n, OUTPUT, 0, Pt2d(x, 30 + j * 6));
 			n->outputs[j]->locked = 1;
-			n->outputs[j]->note = j + (i % 2 * 24);
-			n->outputs[j]->chan = n->channel + i;
+			n->outputs[j]->note = j + (i * 12);
+			n->outputs[j]->channel = i;
 			n->outputs[j]->shrp = sharps[abs(n->outputs[j]->note) % 12];
 		}
 	}
@@ -535,12 +533,13 @@ domouse(SDL_Event *event, Brush *b)
 void
 dokey(Noton *n, SDL_Event *event, Brush *b)
 {
-	/* int shift = SDL_GetModState() & KMOD_LSHIFT || SDL_GetModState() & KMOD_RSHIFT; */
 	switch(event->key.keysym.sym) {
 	case SDLK_ESCAPE: quit(); break;
 	case SDLK_BACKSPACE: destroy(n); break;
 	case SDLK_SPACE: toggle(n); break;
+	case SDLK_MINUS:
 	case SDLK_LESS: modoct(n, -1); break;
+	case SDLK_EQUALS:
 	case SDLK_GREATER: modoct(n, 1); break;
 	case SDLK_1: modchan(n, 0); break;
 	case SDLK_2: modchan(n, 1); break;
