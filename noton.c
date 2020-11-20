@@ -13,13 +13,14 @@
 #define color4 0x72dec2
 #define color0 0xffb545
 
-#define GATEMAX 64
-#define WIREMAX 128
+#define GATEMAX 128
+#define WIREMAX 256
 #define WIREPTMAX 128
 #define PORTMAX 32
 #define INPUTMAX 8
 #define OUTPUTMAX 12
 
+#define CHANNELS 8
 #define DEVICE 0
 
 typedef enum {
@@ -202,7 +203,19 @@ toggle(Noton *n)
 void
 destroy(Noton *n)
 {
-	/* TODO */
+	int i;
+	for(i = 0; i < n->wlen; i++) {
+		n->wires[i].len = 0;
+		n->wlen--;
+	}
+	for(i = 0; i < n->glen; i++) {
+		if(n->gates[i].locked)
+			continue;
+		n->gates[i].inlen = 0;
+		n->gates[i].outlen = 0;
+		n->glen--;
+	}
+	n->alive = 1;
 }
 
 /* Add/Remove */
@@ -418,30 +431,28 @@ run(Noton *n)
 void
 setup(Noton *n)
 {
-	int i;
+	int i, j;
 	Gate *gtrue, *gfalse;
-	int octave[12] = {0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0};
+	int sharps[12] = {0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0};
 	for(i = 0; i < INPUTMAX; ++i) {
 		int x = i % 2 == 0 ? 27 : 20;
 		n->inputs[i] = addgate(n, INPUT, 0, Pt2d(x, 30 + i * 6));
 		n->inputs[i]->locked = 1;
 	}
-	for(i = 0; i < OUTPUTMAX; ++i) {
-		int x = WIDTH - (i % 2 == 0 ? 61 : 54);
-		n->outputs[i] = addgate(n, OUTPUT, 0, Pt2d(x, 30 + i * 6));
-		n->outputs[i]->locked = 1;
-		n->outputs[i]->note = i;
-		n->outputs[i]->chan = 0;
-		n->outputs[i]->shrp = octave[abs(n->outputs[i]->note) % 12];
+
+	/* 61:54 47:40 */
+
+	for(i = 0; i < CHANNELS; ++i) {
+		for(j = 0; j < OUTPUTMAX; ++j) {
+			int x = WIDTH - (j % 2 == 0 ? 47 : 40) - (i * 15);
+			n->outputs[j] = addgate(n, OUTPUT, 0, Pt2d(x, 30 + j * 6));
+			n->outputs[j]->locked = 1;
+			n->outputs[j]->note = j + (i % 2 * 24);
+			n->outputs[j]->chan = i;
+			n->outputs[j]->shrp = sharps[abs(n->outputs[j]->note) % 12];
+		}
 	}
-	for(i = 0; i < OUTPUTMAX; ++i) {
-		int x = WIDTH - (i % 2 == 0 ? 47 : 40);
-		n->outputs[i] = addgate(n, OUTPUT, 0, Pt2d(x, 30 + i * 6));
-		n->outputs[i]->locked = 1;
-		n->outputs[i]->note = i + 24;
-		n->outputs[i]->chan = 0;
-		n->outputs[i]->shrp = octave[abs(n->outputs[i]->note) % 12];
-	}
+
 	gfalse = addgate(n, INPUT, 0, Pt2d((10 % 2 == 0 ? 26 : 20), 30 + 10 * 6));
 	gfalse->locked = 1;
 	gtrue = addgate(n, INPUT, 1, Pt2d((11 % 2 == 0 ? 26 : 20), 30 + 11 * 6));
@@ -520,9 +531,8 @@ dokey(Noton *n, SDL_Event *event, Brush *b)
 	/* int shift = SDL_GetModState() & KMOD_LSHIFT || SDL_GetModState() & KMOD_RSHIFT; */
 	switch(event->key.keysym.sym) {
 	case SDLK_ESCAPE: quit(); break;
-	case SDLK_BACKSPACE: redraw(pixels, b); break;
+	case SDLK_BACKSPACE: destroy(n); break;
 	case SDLK_SPACE: toggle(n); break;
-	case SDLK_n: destroy(n); break;
 	case SDLK_1: select(n, 0); break;
 	case SDLK_2: select(n, 1); break;
 	case SDLK_3: select(n, 2); break;

@@ -14,8 +14,8 @@ cc noton.c -std=c89 -Os -DNDEBUG -g0 -s -Wall -L/usr/local/lib -lSDL2 -lportmidi
 
 ### General
 
-- `BACKSPACE` Erase last stroke(TODO)
-- `SPACE` Toggle play/pause
+- `BACKSPACE` Erase
+- `SPACE` Toggle play
 - `1-9` Select channel
 - `<` Octave down(TODO)
 - `>` Octave up(TODO)
@@ -28,8 +28,5 @@ cc noton.c -std=c89 -Os -DNDEBUG -g0 -s -Wall -L/usr/local/lib -lSDL2 -lportmidi
 ### TODO
 
 - Don't change polarity twice per frame.
-- Implement erase
-- Consider changing output to 1 note of 8 bits instead of 12 notes.
-- flag deleted nodes and wires
 - export image
 - add change octave shortcut
