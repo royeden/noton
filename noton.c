@@ -20,6 +20,8 @@
 #define INPUTMAX 8
 #define OUTPUTMAX 12
 
+#define DEVICE 0
+
 typedef enum {
 	INPUT,
 	OUTPUT,
@@ -31,12 +33,12 @@ typedef struct {
 } Point2d;
 
 typedef struct Wire {
-	int id, active, polarity, a, b, len;
+	int id, polarity, a, b, len;
 	Point2d points[WIREPTMAX];
 } Wire;
 
 typedef struct Gate {
-	int id, active, polarity, locked, inlen, outlen;
+	int id, polarity, locked, inlen, outlen;
 	int chan, note, shrp;
 	Point2d pos;
 	GateType type;
@@ -45,8 +47,10 @@ typedef struct Gate {
 
 typedef struct Noton {
 	unsigned int alive, frame, speed, channel, octave;
+	int glen, wlen;
 	Gate gates[GATEMAX];
 	Wire wires[WIREMAX];
+	PmStream *midi;
 	Gate *inputs[INPUTMAX], *outputs[OUTPUTMAX];
 } Noton;
 
@@ -63,9 +67,8 @@ SDL_Renderer *gRenderer = NULL;
 SDL_Texture *gTexture = NULL;
 uint32_t *pixels;
 Noton noton;
-PmStream *midi;
 
-/* helpers */
+/* generics */
 
 int
 distance(Point2d a, Point2d b)
@@ -81,6 +84,14 @@ setpt2d(Point2d *p, int x, int y)
 	return p;
 }
 
+Point2d *
+cpypt2d(Point2d *dst, Point2d *src)
+{
+	dst->x = src->x;
+	dst->y = src->y;
+	return dst;
+}
+
 Point2d
 Pt2d(int x, int y)
 {
@@ -89,74 +100,43 @@ Pt2d(int x, int y)
 	return pos;
 }
 
-void
-play(int channel, int octave, int note, int z)
+int
+polarcolor(int polarity)
 {
-	Pm_WriteShort(midi,
+	return polarity == 1 ? color4 : !polarity ? color0 : color3;
+}
+
+/* Midi */
+
+void
+initmidi(void)
+{
+	int i;
+	Pm_Initialize();
+	for(i = 0; i < Pm_CountDevices(); ++i) {
+		char const *name = Pm_GetDeviceInfo(i)->name;
+		printf("Device #%d -> %s%s\n", i, name, i == DEVICE ? "[x]" : "[ ]");
+	}
+	Pm_OpenOutput(&noton.midi, DEVICE, NULL, 128, 0, NULL, 1);
+}
+
+void
+playmidi(int channel, int octave, int note, int z)
+{
+	Pm_WriteShort(noton.midi,
 		Pt_Time(),
 		Pm_Message(0x90 + channel, (octave * 12) + note, z ? 100 : 0));
 }
 
-void
-select(Noton *n, int channel)
-{
-	printf("Select channel #%d\n", channel);
-	n->channel = channel;
-}
-
-void
-destroy(Noton *n)
-{
-	/* TODO */
-}
-
-void
-toggle(Noton *n)
-{
-	n->alive = !n->alive;
-}
+/* Helpers */
 
 Gate *
-findgateid(Noton *n, int id)
-{
-	if(id < 0 || id >= GATEMAX)
-		return NULL;
-	if(!&n->gates[id] || !n->gates[id].active)
-		return NULL;
-	return &n->gates[id];
-}
-
-Gate *
-availgate(Noton *n)
+nearestgate(Noton *n, Point2d pos)
 {
 	int i;
-	for(i = 0; i < GATEMAX; ++i)
-		if(!n->gates[i].active) {
-			n->gates[i].id = i;
-			return &n->gates[i];
-		}
-	return NULL;
-}
-
-Wire *
-availwire(Noton *n)
-{
-	int i;
-	for(i = 0; i < WIREMAX; ++i)
-		if(!n->wires[i].active) {
-			n->wires[i].id = i;
-			return &n->wires[i];
-		}
-	return NULL;
-}
-
-Gate *
-findgateat(Noton *n, Point2d pos)
-{
-	int i;
-	for(i = 0; i < GATEMAX; ++i) {
+	for(i = 0; i < n->glen; ++i) {
 		Gate *g = &n->gates[i];
-		if(g->active && distance(pos, g->pos) < 50)
+		if(distance(pos, g->pos) < 50)
 			return g;
 	}
 	return NULL;
@@ -166,9 +146,8 @@ int
 getpolarity(Gate *g)
 {
 	int i;
-	if(!g->active || g->inlen < 1)
+	if(g->inlen < 1)
 		return -1;
-	/* TODO: Ignore inactive wires */
 	if(g->inlen == 1)
 		return g->inputs[0]->polarity;
 	for(i = 0; i < g->inlen; i++)
@@ -181,12 +160,10 @@ void
 polarize(Gate *g)
 {
 	int i;
-	if(!g->active)
-		return;
 	if(g->type == OUTPUT) {
 		int newpolarity = getpolarity(g);
 		if(newpolarity != -1 && g->polarity != newpolarity)
-			play(noton.channel, noton.octave, g->note, newpolarity);
+			playmidi(noton.channel, noton.octave, g->note, newpolarity);
 		g->polarity = newpolarity;
 	} else if(g->type)
 		g->polarity = getpolarity(g);
@@ -197,12 +174,35 @@ polarize(Gate *g)
 void
 bang(Gate *g, int depth)
 {
-	int i, a = depth - 1;
-	if(a < 1 || !g || !g->active)
-		return;
-	polarize(g);
-	for(i = 0; i < g->outlen; ++i)
-		bang(findgateid(&noton, g->outputs[i]->b), a);
+	int i, d = depth - 1;
+	if(d && g) {
+		polarize(g);
+		for(i = 0; i < g->outlen; ++i)
+			if(&noton.gates[g->outputs[i]->b])
+				bang(&noton.gates[g->outputs[i]->b], d);
+	}
+}
+
+/* Options */
+
+void
+select(Noton *n, int channel)
+{
+	n->channel = channel;
+	printf("Select channel #%d\n", channel);
+}
+
+void
+toggle(Noton *n)
+{
+	n->alive = !n->alive;
+	printf("Toggle %s\n", n->alive ? "play" : "pause");
+}
+
+void
+destroy(Noton *n)
+{
+	/* TODO */
 }
 
 /* Add/Remove */
@@ -211,24 +211,23 @@ Wire *
 addwire(Noton *n, Wire *temp, Gate *from, Gate *to)
 {
 	int i;
-	Wire *w = availwire(n);
-	printf("Add wire #%d(#%d->#%d) \n", w->id, from->id, to->id);
-	w->active = 1;
+	Wire *w = &n->wires[n->wlen];
+	w->id = n->wlen++;
 	w->polarity = -1;
 	w->a = from->id;
 	w->b = to->id;
 	w->len = 0;
 	for(i = 0; i < temp->len; i++)
 		setpt2d(&w->points[w->len++], temp->points[i].x, temp->points[i].y);
+	printf("Add wire #%d(#%d->#%d) \n", w->id, from->id, to->id);
 	return w;
 }
 
 Gate *
 addgate(Noton *n, GateType type, int polarity, Point2d pos)
 {
-	Gate *g = availgate(n);
-	printf("Add gate #%d \n", g->id);
-	g->active = 1;
+	Gate *g = &n->gates[n->glen];
+	g->id = n->glen++;
 	g->polarity = polarity;
 	g->chan = 0;
 	g->note = 0;
@@ -237,6 +236,7 @@ addgate(Noton *n, GateType type, int polarity, Point2d pos)
 	g->outlen = 0;
 	g->type = type;
 	g->pos = pos;
+	printf("Add gate #%d \n", g->id);
 	return g;
 }
 
@@ -247,30 +247,24 @@ extendwire(Brush *b)
 {
 	if(b->wire.len >= WIREPTMAX)
 		return;
-	if(b->wire.len > 0 && distance(b->wire.points[b->wire.len - 1], b->pos) < 20)
+	if(distance(b->wire.points[b->wire.len - 1], b->pos) < 20)
 		return;
-	setpt2d(&b->wire.points[b->wire.len++], b->pos.x, b->pos.y);
+	cpypt2d(&b->wire.points[b->wire.len++], &b->pos);
 }
 
 void
 beginwire(Brush *b)
 {
-	Gate *gate = findgateat(&noton, b->pos);
-	b->wire.active = 1;
-	b->wire.polarity = -1;
-	if(gate) {
-		b->wire.polarity = gate->polarity;
-		setpt2d(&b->pos, gate->pos.x, gate->pos.y);
-	}
+	Gate *gate = nearestgate(&noton, b->pos);
+	b->wire.polarity = gate ? gate->polarity : -1;
 	b->wire.len = 0;
-	extendwire(b);
+	cpypt2d(&b->wire.points[b->wire.len++], gate ? &gate->pos : &b->pos);
 }
 
 int
 abandon(Brush *b)
 {
 	b->wire.len = 0;
-	b->wire.active = 0;
 	return 0;
 }
 
@@ -281,10 +275,10 @@ endwire(Brush *b)
 	Gate *gatefrom, *gateto;
 	if(b->wire.len < 1)
 		return abandon(b);
-	gatefrom = findgateat(&noton, b->wire.points[0]);
+	gatefrom = nearestgate(&noton, b->wire.points[0]);
 	if(!gatefrom)
 		return abandon(b);
-	gateto = findgateat(&noton, b->pos);
+	gateto = nearestgate(&noton, b->pos);
 	if(!gateto)
 		return abandon(b);
 	if(!gateto->type)
@@ -352,15 +346,13 @@ void
 drawwire(uint32_t *dst, Wire *w, int color)
 {
 	int i;
-	if(!w->active)
-		return;
 	for(i = 0; i < w->len - 1; i++) {
 		Point2d p1 = w->points[i];
 		Point2d *p2 = &w->points[i + 1];
 		if(p2) {
 			line(dst, p1.x, p1.y, p2->x, p2->y, color);
 			if((int)(noton.frame / 3) % w->len != i)
-				line(dst, p1.x, p1.y, p2->x, p2->y, w->polarity == 1 ? color4 : !w->polarity ? color0 : color3);
+				line(dst, p1.x, p1.y, p2->x, p2->y, polarcolor(w->polarity));
 		}
 	}
 }
@@ -369,9 +361,7 @@ void
 drawgate(uint32_t *dst, Gate *g)
 {
 	int r = 17;
-	if(!g->active)
-		return;
-	circle(dst, g->pos.x, g->pos.y, r, g->polarity == 1 ? color4 : g->polarity == 0 ? color0 : color3);
+	circle(dst, g->pos.x, g->pos.y, r, polarcolor(g->polarity));
 	if(g->type == OUTPUT) {
 		pixel(dst, g->pos.x - 1, g->pos.y, g->shrp ? color2 : color1);
 		pixel(dst, g->pos.x + 1, g->pos.y, g->shrp ? color2 : color1);
@@ -395,12 +385,11 @@ redraw(uint32_t *dst, Brush *b)
 {
 	int i;
 	clear(dst);
-	for(i = 0; i < GATEMAX; i++)
+	for(i = 0; i < noton.glen; i++)
 		drawgate(dst, &noton.gates[i]);
-	for(i = 0; i < WIREMAX; i++)
+	for(i = 0; i < noton.wlen; i++)
 		drawwire(dst, &noton.wires[i], color2);
-	if(b->wire.active)
-		drawwire(dst, &b->wire, color3);
+	drawwire(dst, &b->wire, color3);
 	SDL_UpdateTexture(gTexture, NULL, dst, WIDTH * sizeof(uint32_t));
 	SDL_RenderClear(gRenderer);
 	SDL_RenderCopy(gRenderer, gTexture, NULL, NULL);
@@ -421,38 +410,41 @@ run(Noton *n)
 	n->inputs[3]->polarity = (n->frame / 8) % 4 == 1;
 	n->inputs[5]->polarity = (n->frame / 8) % 4 == 2;
 	n->inputs[7]->polarity = (n->frame / 8) % 4 == 3;
-	for(i = 0; i < GATEMAX; ++i)
+	for(i = 0; i < n->glen; ++i)
 		bang(&n->gates[i], 10);
 	n->frame++;
 }
 
 void
-setup(void)
+setup(Noton *n)
 {
 	int i;
 	Gate *gtrue, *gfalse;
 	int octave[12] = {0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0};
 	for(i = 0; i < INPUTMAX; ++i) {
-		noton.inputs[i] = addgate(&noton, INPUT, 0, Pt2d(i % 2 == 0 ? 27 : 20, 30 + i * 6));
-		noton.inputs[i]->locked = 1;
+		int x = i % 2 == 0 ? 27 : 20;
+		n->inputs[i] = addgate(n, INPUT, 0, Pt2d(x, 30 + i * 6));
+		n->inputs[i]->locked = 1;
 	}
 	for(i = 0; i < OUTPUTMAX; ++i) {
-		noton.outputs[i] = addgate(&noton, OUTPUT, 0, Pt2d(WIDTH - (i % 2 == 0 ? 61 : 54), 30 + i * 6));
-		noton.outputs[i]->locked = 1;
-		noton.outputs[i]->note = i;
-		noton.outputs[i]->chan = 0;
-		noton.outputs[i]->shrp = octave[abs(noton.outputs[i]->note) % 12];
+		int x = WIDTH - (i % 2 == 0 ? 61 : 54);
+		n->outputs[i] = addgate(n, OUTPUT, 0, Pt2d(x, 30 + i * 6));
+		n->outputs[i]->locked = 1;
+		n->outputs[i]->note = i;
+		n->outputs[i]->chan = 0;
+		n->outputs[i]->shrp = octave[abs(n->outputs[i]->note) % 12];
 	}
 	for(i = 0; i < OUTPUTMAX; ++i) {
-		noton.outputs[i] = addgate(&noton, OUTPUT, 0, Pt2d(WIDTH - (i % 2 == 0 ? 47 : 40), 30 + i * 6));
-		noton.outputs[i]->locked = 1;
-		noton.outputs[i]->note = i + 24;
-		noton.outputs[i]->chan = 0;
-		noton.outputs[i]->shrp = octave[abs(noton.outputs[i]->note) % 12];
+		int x = WIDTH - (i % 2 == 0 ? 47 : 40);
+		n->outputs[i] = addgate(n, OUTPUT, 0, Pt2d(x, 30 + i * 6));
+		n->outputs[i]->locked = 1;
+		n->outputs[i]->note = i + 24;
+		n->outputs[i]->chan = 0;
+		n->outputs[i]->shrp = octave[abs(n->outputs[i]->note) % 12];
 	}
-	gfalse = addgate(&noton, INPUT, 0, Pt2d((10 % 2 == 0 ? 26 : 20), 30 + 10 * 6));
+	gfalse = addgate(n, INPUT, 0, Pt2d((10 % 2 == 0 ? 26 : 20), 30 + 10 * 6));
 	gfalse->locked = 1;
-	gtrue = addgate(&noton, INPUT, 1, Pt2d((11 % 2 == 0 ? 26 : 20), 30 + 11 * 6));
+	gtrue = addgate(n, INPUT, 1, Pt2d((11 % 2 == 0 ? 26 : 20), 30 + 11 * 6));
 	gtrue->locked = 1;
 }
 
@@ -510,7 +502,7 @@ domouse(SDL_Event *event, Brush *b)
 			(event->motion.x - (PAD * ZOOM)) / ZOOM,
 			(event->motion.y - (PAD * ZOOM)) / ZOOM);
 		if(event->button.button == SDL_BUTTON_RIGHT) {
-			if(!findgateat(&noton, b->pos))
+			if(!nearestgate(&noton, b->pos))
 				addgate(&noton, XOR, -1, b->pos);
 			redraw(pixels, b);
 			break;
@@ -541,16 +533,6 @@ dokey(Noton *n, SDL_Event *event, Brush *b)
 	case SDLK_8: select(n, 7); break;
 	case SDLK_9: select(n, 8); break;
 	}
-}
-
-void
-initmidi(void)
-{
-	int i, select = 0;
-	Pm_Initialize();
-	for(i = 0; i < Pm_CountDevices(); ++i)
-		printf("#%d -> %s%s\n", i, Pm_GetDeviceInfo(i)->name, i == select ? "(selected)" : "");
-	Pm_OpenOutput(&midi, select, NULL, 128, 0, NULL, 1);
 }
 
 int
@@ -595,7 +577,7 @@ main(int argc, char **argv)
 
 	Brush brush;
 	brush.down = 0;
-	brush.wire.active = 0;
+	brush.wire.len = 0;
 
 	noton.alive = 1;
 	noton.speed = 40;
@@ -605,7 +587,7 @@ main(int argc, char **argv)
 	if(!init())
 		return error("Init", "Failure");
 
-	setup();
+	setup(&noton);
 
 	while(1) {
 		SDL_Event event;

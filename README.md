@@ -6,6 +6,10 @@ A minimal logic gates playground, written in ANSI C.
 
 To build [noton](https://wiki.xxiivv.com/noton), you must have [SDL2](https://wiki.libsdl.org/) and [PortMidi](http://portmedia.sourceforge.net/portmidi/).
 
+```
+cc noton.c -std=c89 -Os -DNDEBUG -g0 -s -Wall -L/usr/local/lib -lSDL2 -lportmidi -o noton
+```
+
 ## Controls
 
 ### General
@@ -29,8 +33,3 @@ To build [noton](https://wiki.xxiivv.com/noton), you must have [SDL2](https://wi
 - flag deleted nodes and wires
 - export image
 - add change octave shortcut
-
-## Notes
-
-- Wires and Gates are added to the scene with an active flag.
-- When these are destroyed, their id is going to recycled when a new wire or cable is needed.
