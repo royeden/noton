@@ -11,13 +11,13 @@
 #define color2 0x000000
 #define color3 0xcccccc
 #define color4 0x72dec2
-#define color0 0xffb545
+#define color0 0x32ae82
 
 #define GATEMAX 128
 #define WIREMAX 256
 #define WIREPTMAX 128
 #define PORTMAX 32
-#define INPUTMAX 8
+#define INPUTMAX 12
 #define OUTPUTMAX 12
 
 #define CHANNELS 8
@@ -26,7 +26,7 @@
 typedef enum {
 	INPUT,
 	OUTPUT,
-	XOR
+	BASIC
 } GateType;
 
 typedef struct {
@@ -434,10 +434,14 @@ run(Noton *n)
 	n->inputs[2]->polarity = (n->frame / 8) % 2;
 	n->inputs[4]->polarity = (n->frame / 16) % 2;
 	n->inputs[6]->polarity = (n->frame / 32) % 2;
+	n->inputs[8]->polarity = (n->frame / 64) % 2;
+	n->inputs[10]->polarity = (n->frame / 128) % 2;
 	n->inputs[1]->polarity = (n->frame / 8) % 4 == 0;
 	n->inputs[3]->polarity = (n->frame / 8) % 4 == 1;
 	n->inputs[5]->polarity = (n->frame / 8) % 4 == 2;
 	n->inputs[7]->polarity = (n->frame / 8) % 4 == 3;
+	n->inputs[9]->polarity = 1;
+	n->inputs[11]->polarity = 0;
 	for(i = 0; i < n->glen; ++i)
 		bang(&n->gates[i], 10);
 	n->frame++;
@@ -447,27 +451,22 @@ void
 setup(Noton *n)
 {
 	int i, j;
-	Gate *gtrue, *gfalse;
 	int sharps[12] = {0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0};
 	for(i = 0; i < INPUTMAX; ++i) {
 		int x = i % 2 == 0 ? 20 : 27;
-		n->inputs[i] = addgate(n, INPUT, 0, Pt2d(x, 30 + i * 6));
+		n->inputs[i] = addgate(n, INPUT, 0, Pt2d(x, 24 + i * 7));
 		n->inputs[i]->locked = 1;
 	}
 	for(i = 0; i < CHANNELS; ++i) {
 		for(j = 0; j < OUTPUTMAX; ++j) {
-			int x = WIDTH - (j % 2 == 0 ? 47 : 40) - (i * 15);
-			n->outputs[j] = addgate(n, OUTPUT, 0, Pt2d(x, 30 + j * 6));
+			int x = WIDTH - (j % 2 == 0 ? 47 : 40) - (i * 14);
+			n->outputs[j] = addgate(n, OUTPUT, 0, Pt2d(x, 24 + j * 7));
 			n->outputs[j]->locked = 1;
 			n->outputs[j]->note = j + ((i % 3) * 24);
 			n->outputs[j]->channel = i;
 			n->outputs[j]->shrp = sharps[abs(n->outputs[j]->note) % 12];
 		}
 	}
-	gfalse = addgate(n, INPUT, 0, Pt2d((10 % 2 == 0 ? 26 : 20), 30 + 10 * 6));
-	gfalse->locked = 1;
-	gtrue = addgate(n, INPUT, 1, Pt2d((11 % 2 == 0 ? 26 : 20), 30 + 11 * 6));
-	gtrue->locked = 1;
 }
 
 /* options */
@@ -525,7 +524,7 @@ domouse(SDL_Event *event, Brush *b)
 			(event->motion.y - (PAD * ZOOM)) / ZOOM);
 		if(event->button.button == SDL_BUTTON_RIGHT) {
 			if(!nearestgate(&noton, b->pos))
-				addgate(&noton, XOR, -1, b->pos);
+				addgate(&noton, BASIC, -1, b->pos);
 			redraw(pixels, b);
 			break;
 		}
@@ -597,7 +596,6 @@ main(int argc, char **argv)
 	Uint32 begintime = 0;
 	Uint32 endtime = 0;
 	Uint32 delta = 0;
-	short fps = 60;
 
 	Brush brush;
 	brush.down = 0;
@@ -622,10 +620,6 @@ main(int argc, char **argv)
 
 		if(delta < noton.speed)
 			SDL_Delay(noton.speed - delta);
-		if(delta > noton.speed)
-			fps = 1000 / delta;
-		if(fps < 15)
-			printf("Slowdown: %ifps\n", fps);
 
 		if(noton.alive) {
 			run(&noton);
