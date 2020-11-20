@@ -202,6 +202,14 @@ modoct(Noton *n, int mod)
 }
 
 void
+modspeed(Noton *n, int mod)
+{
+	if((n->speed > 10 && mod < 0) || (n->speed < 100 && mod > 0))
+		n->speed += mod;
+	printf("Select speed #%d\n", n->speed);
+}
+
+void
 toggle(Noton *n)
 {
 	n->alive = !n->alive;
@@ -211,7 +219,7 @@ toggle(Noton *n)
 void
 destroy(Noton *n)
 {
-	int i, locked;
+	int i, locked = 0;
 	for(i = 0; i < n->wlen; i++)
 		n->wires[i].len = 0;
 	for(i = 0; i < n->glen; i++) {
@@ -221,7 +229,7 @@ destroy(Noton *n)
 			locked++;
 	}
 	n->wlen = 0;
-	n->glen = n->wlen;
+	n->glen = locked;
 	n->alive = 1;
 }
 
@@ -442,11 +450,10 @@ setup(Noton *n)
 	Gate *gtrue, *gfalse;
 	int sharps[12] = {0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0};
 	for(i = 0; i < INPUTMAX; ++i) {
-		int x = i % 2 == 0 ? 27 : 20;
+		int x = i % 2 == 0 ? 20 : 27;
 		n->inputs[i] = addgate(n, INPUT, 0, Pt2d(x, 30 + i * 6));
 		n->inputs[i]->locked = 1;
 	}
-
 	for(i = 0; i < CHANNELS; ++i) {
 		for(j = 0; j < OUTPUTMAX; ++j) {
 			int x = WIDTH - (j % 2 == 0 ? 47 : 40) - (i * 15);
@@ -457,7 +464,6 @@ setup(Noton *n)
 			n->outputs[j]->shrp = sharps[abs(n->outputs[j]->note) % 12];
 		}
 	}
-
 	gfalse = addgate(n, INPUT, 0, Pt2d((10 % 2 == 0 ? 26 : 20), 30 + 10 * 6));
 	gfalse->locked = 1;
 	gtrue = addgate(n, INPUT, 1, Pt2d((11 % 2 == 0 ? 26 : 20), 30 + 11 * 6));
@@ -537,10 +543,10 @@ dokey(Noton *n, SDL_Event *event, Brush *b)
 	case SDLK_ESCAPE: quit(); break;
 	case SDLK_BACKSPACE: destroy(n); break;
 	case SDLK_SPACE: toggle(n); break;
-	case SDLK_MINUS:
-	case SDLK_LESS: modoct(n, -1); break;
-	case SDLK_EQUALS:
-	case SDLK_GREATER: modoct(n, 1); break;
+	case SDLK_UP: modoct(n, 1); break;
+	case SDLK_DOWN: modoct(n, -1); break;
+	case SDLK_LEFT: modspeed(n, 5); break;
+	case SDLK_RIGHT: modspeed(n, -5); break;
 	case SDLK_1: modchan(n, 0); break;
 	case SDLK_2: modchan(n, 1); break;
 	case SDLK_3: modchan(n, 2); break;

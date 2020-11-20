@@ -17,8 +17,10 @@ cc noton.c -std=c89 -Os -DNDEBUG -g0 -s -Wall -L/usr/local/lib -lSDL2 -lportmidi
 - `BACKSPACE` Erase
 - `SPACE` Toggle play
 - `1-9` Select channel
-- `<` Octave down
-- `>` Octave up
+- `up` Octave up
+- `down` Octave down
+- `right` Speed up
+- `left` Speed down
 
 ### Paint
 
