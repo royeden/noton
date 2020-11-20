@@ -196,7 +196,8 @@ modchan(Noton *n, int channel)
 void
 modoct(Noton *n, int mod)
 {
-	n->octave += mod;
+	if((n->octave > 0 && mod < 0) || (n->octave < 8 && mod > 0))
+		n->octave += mod;
 	printf("Select octave #%d\n", n->octave);
 }
 
@@ -210,18 +211,17 @@ toggle(Noton *n)
 void
 destroy(Noton *n)
 {
-	int i;
-	for(i = 0; i < n->wlen; i++) {
+	int i, locked;
+	for(i = 0; i < n->wlen; i++)
 		n->wires[i].len = 0;
-		n->wlen--;
-	}
 	for(i = 0; i < n->glen; i++) {
 		n->gates[i].inlen = 0;
 		n->gates[i].outlen = 0;
 		if(n->gates[i].locked)
-			continue;
-		n->glen--;
+			locked++;
 	}
+	n->wlen = 0;
+	n->glen = n->wlen;
 	n->alive = 1;
 }
 
@@ -452,7 +452,7 @@ setup(Noton *n)
 			int x = WIDTH - (j % 2 == 0 ? 47 : 40) - (i * 15);
 			n->outputs[j] = addgate(n, OUTPUT, 0, Pt2d(x, 30 + j * 6));
 			n->outputs[j]->locked = 1;
-			n->outputs[j]->note = j + (i * 12);
+			n->outputs[j]->note = j + ((i % 3) * 24);
 			n->outputs[j]->channel = i;
 			n->outputs[j]->shrp = sharps[abs(n->outputs[j]->note) % 12];
 		}
@@ -600,7 +600,7 @@ main(int argc, char **argv)
 	noton.alive = 1;
 	noton.speed = 40;
 	noton.channel = 0;
-	noton.octave = 3;
+	noton.octave = 2;
 
 	if(!init())
 		return error("Init", "Failure");
