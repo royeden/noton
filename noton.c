@@ -20,7 +20,7 @@
 #define INPUTMAX 12
 #define OUTPUTMAX 12
 
-#define CHANNELS 8
+#define CHANNELS 4
 #define DEVICE 0
 
 typedef enum {
@@ -450,16 +450,16 @@ void
 run(Noton *n)
 {
 	int i;
-	n->inputs[0]->polarity = (n->frame / 4) % 2;
-	n->inputs[2]->polarity = (n->frame / 8) % 2;
-	n->inputs[4]->polarity = (n->frame / 16) % 2;
-	n->inputs[6]->polarity = (n->frame / 32) % 2;
-	n->inputs[8]->polarity = (n->frame / 64) % 2;
-	n->inputs[10]->polarity = (n->frame / 128) % 2;
-	n->inputs[1]->polarity = (n->frame / 8) % 4 == 0;
-	n->inputs[3]->polarity = (n->frame / 8) % 4 == 1;
-	n->inputs[5]->polarity = (n->frame / 8) % 4 == 2;
-	n->inputs[7]->polarity = (n->frame / 8) % 4 == 3;
+	n->inputs[0]->polarity = (n->frame >> 2) % 2;
+	n->inputs[2]->polarity = (n->frame >> 3) % 2;
+	n->inputs[4]->polarity = (n->frame >> 4) % 2;
+	n->inputs[6]->polarity = (n->frame >> 5) % 2;
+	n->inputs[8]->polarity = (n->frame >> 6) % 2;
+	n->inputs[10]->polarity = (n->frame >> 7) % 2;
+	n->inputs[1]->polarity = (n->frame >> 3) % 4 == 0;
+	n->inputs[3]->polarity = (n->frame >> 3) % 4 == 1;
+	n->inputs[5]->polarity = (n->frame >> 3) % 4 == 2;
+	n->inputs[7]->polarity = (n->frame >> 3) % 4 == 3;
 	n->inputs[9]->polarity = 1;
 	n->inputs[11]->polarity = 0;
 	for(i = 0; i < n->glen; ++i)
