@@ -26,6 +26,7 @@
 typedef enum {
 	INPUT,
 	OUTPUT,
+	POOL,
 	BASIC
 } GateType;
 
@@ -34,7 +35,7 @@ typedef struct {
 } Point2d;
 
 typedef struct Wire {
-	int id, polarity, a, b, len;
+	int id, polarity, a, b, len, flex;
 	Point2d points[WIREPTMAX];
 } Wire;
 
@@ -47,7 +48,7 @@ typedef struct Gate {
 } Gate;
 
 typedef struct Noton {
-	unsigned int alive, frame, speed, channel, octave;
+	int alive, frame, speed, channel, octave;
 	int glen, wlen;
 	Gate gates[GATEMAX];
 	Wire wires[WIREMAX];
@@ -166,7 +167,7 @@ polarize(Gate *g)
 		if(newpolarity != -1 && g->polarity != newpolarity)
 			playmidi(noton.channel + g->channel, noton.octave, g->note, newpolarity);
 		g->polarity = newpolarity;
-	} else if(g->type)
+	} else if(g->type == BASIC)
 		g->polarity = getpolarity(g);
 	for(i = 0; i < g->outlen; ++i)
 		g->outputs[i]->polarity = g->polarity;
@@ -178,10 +179,28 @@ bang(Gate *g, int depth)
 	int i, d = depth - 1;
 	if(d && g) {
 		polarize(g);
+		if(g->type != OUTPUT)
+			return;
 		for(i = 0; i < g->outlen; ++i)
 			if(&noton.gates[g->outputs[i]->b])
 				bang(&noton.gates[g->outputs[i]->b], d);
 	}
+}
+
+void
+flex(Wire *w)
+{
+	int i;
+	if(w->len < 3 || !w->flex || noton.frame % 15 != 0)
+		return;
+	for(i = 1; i < w->len - 1; ++i) {
+		Point2d *a = &w->points[i - 1];
+		Point2d *b = &w->points[i];
+		Point2d *c = &w->points[i + 1];
+		b->x = (a->x + b->x + c->x) / 3;
+		b->y = (a->y + b->y + c->y) / 3;
+	}
+	w->flex--;
 }
 
 /* Options */
@@ -245,6 +264,7 @@ addwire(Noton *n, Wire *temp, Gate *from, Gate *to)
 	w->a = from->id;
 	w->b = to->id;
 	w->len = 0;
+	w->flex = 4;
 	for(i = 0; i < temp->len; i++)
 		setpt2d(&w->points[w->len++], temp->points[i].x, temp->points[i].y);
 	printf("Add wire #%d(#%d->#%d) \n", w->id, from->id, to->id);
@@ -395,7 +415,7 @@ drawgate(uint32_t *dst, Gate *g)
 		pixel(dst, g->pos.x + 1, g->pos.y, g->shrp ? color2 : color1);
 		pixel(dst, g->pos.x, g->pos.y - 1, g->shrp ? color2 : color1);
 		pixel(dst, g->pos.x, g->pos.y + 1, g->shrp ? color2 : color1);
-	} else
+	} else if(g->type != POOL)
 		pixel(dst, g->pos.x, g->pos.y, color1);
 }
 
@@ -444,6 +464,8 @@ run(Noton *n)
 	n->inputs[11]->polarity = 0;
 	for(i = 0; i < n->glen; ++i)
 		bang(&n->gates[i], 10);
+	for(i = 0; i < n->wlen; ++i)
+		flex(&n->wires[i]);
 	n->frame++;
 }
 
@@ -467,6 +489,8 @@ setup(Noton *n)
 			n->outputs[j]->shrp = sharps[abs(n->outputs[j]->note) % 12];
 		}
 	}
+	n->inputs[9]->type = POOL;
+	n->inputs[11]->type = POOL;
 }
 
 /* options */
