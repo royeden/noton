@@ -206,7 +206,7 @@ flex(Wire *w)
 /* Options */
 
 void
-modchan(Noton *n, int channel)
+selchan(Noton *n, int channel)
 {
 	n->channel = channel;
 	printf("Select channel #%d\n", n->channel);
@@ -229,7 +229,7 @@ modspeed(Noton *n, int mod)
 }
 
 void
-toggle(Noton *n)
+pause(Noton *n)
 {
 	n->alive = !n->alive;
 	printf("Toggle %s\n", n->alive ? "play" : "pause");
@@ -380,17 +380,6 @@ line(uint32_t *dst, int ax, int ay, int bx, int by, int color)
 }
 
 void
-circle(uint32_t *dst, int ax, int ay, int d, int color)
-{
-	int i, r = d / 2;
-	for(i = 0; i < d * d; ++i) {
-		int x = i % d, y = i / d;
-		if(distance(Pt2d(ax, ay), Pt2d(ax - r + x, ay - r + y)) < d)
-			pixel(dst, ax - r + x, ay - r + y, color);
-	}
-}
-
-void
 drawwire(uint32_t *dst, Wire *w, int color)
 {
 	int i;
@@ -408,8 +397,11 @@ drawwire(uint32_t *dst, Wire *w, int color)
 void
 drawgate(uint32_t *dst, Gate *g)
 {
-	int r = 17;
-	circle(dst, g->pos.x, g->pos.y, r, polarcolor(g->polarity));
+	int i, x, y, r = 8, d = r * 2;
+	for(y = 0; y < d; ++y)
+		for(x = 0; x < d; ++x)
+			if(distance(Pt2d(g->pos.x, g->pos.y), Pt2d(g->pos.x - r + x, g->pos.y - r + y)) < 18)
+				pixel(dst, g->pos.x - r + x, g->pos.y - r + y, polarcolor(g->polarity));
 	if(g->type == OUTPUT) {
 		pixel(dst, g->pos.x - 1, g->pos.y, g->shrp ? color2 : color1);
 		pixel(dst, g->pos.x + 1, g->pos.y, g->shrp ? color2 : color1);
@@ -450,12 +442,12 @@ void
 run(Noton *n)
 {
 	int i;
-	n->inputs[0]->polarity = (n->frame >> 2) % 2;
-	n->inputs[2]->polarity = (n->frame >> 3) % 2;
-	n->inputs[4]->polarity = (n->frame >> 4) % 2;
-	n->inputs[6]->polarity = (n->frame >> 5) % 2;
-	n->inputs[8]->polarity = (n->frame >> 6) % 2;
-	n->inputs[10]->polarity = (n->frame >> 7) % 2;
+	n->inputs[0]->polarity = (n->frame >> 2) % 2 == 0;
+	n->inputs[2]->polarity = (n->frame >> 3) % 2 == 0;
+	n->inputs[4]->polarity = (n->frame >> 4) % 2 == 0;
+	n->inputs[6]->polarity = (n->frame >> 5) % 2 == 0;
+	n->inputs[8]->polarity = (n->frame >> 6) % 2 == 0;
+	n->inputs[10]->polarity = (n->frame >> 7) % 2 == 0;
 	n->inputs[1]->polarity = (n->frame >> 3) % 4 == 0;
 	n->inputs[3]->polarity = (n->frame >> 3) % 4 == 1;
 	n->inputs[5]->polarity = (n->frame >> 3) % 4 == 2;
@@ -565,20 +557,20 @@ dokey(Noton *n, SDL_Event *event, Brush *b)
 	switch(event->key.keysym.sym) {
 	case SDLK_ESCAPE: quit(); break;
 	case SDLK_BACKSPACE: destroy(n); break;
-	case SDLK_SPACE: toggle(n); break;
+	case SDLK_SPACE: pause(n); break;
 	case SDLK_UP: modoct(n, 1); break;
 	case SDLK_DOWN: modoct(n, -1); break;
 	case SDLK_LEFT: modspeed(n, 5); break;
 	case SDLK_RIGHT: modspeed(n, -5); break;
-	case SDLK_1: modchan(n, 0); break;
-	case SDLK_2: modchan(n, 1); break;
-	case SDLK_3: modchan(n, 2); break;
-	case SDLK_4: modchan(n, 3); break;
-	case SDLK_5: modchan(n, 4); break;
-	case SDLK_6: modchan(n, 5); break;
-	case SDLK_7: modchan(n, 6); break;
-	case SDLK_8: modchan(n, 7); break;
-	case SDLK_9: modchan(n, 8); break;
+	case SDLK_1: selchan(n, 0); break;
+	case SDLK_2: selchan(n, 1); break;
+	case SDLK_3: selchan(n, 2); break;
+	case SDLK_4: selchan(n, 3); break;
+	case SDLK_5: selchan(n, 4); break;
+	case SDLK_6: selchan(n, 5); break;
+	case SDLK_7: selchan(n, 6); break;
+	case SDLK_8: selchan(n, 7); break;
+	case SDLK_9: selchan(n, 8); break;
 	}
 }
 

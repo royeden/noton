@@ -1,6 +1,6 @@
 # Noton
 
-A minimal logic gates playground, written in ANSI C.
+A minimal [color computing playground](https://wiki.xxiivv.com/site/noton.html), written in ANSI C.
 
 Right-click to add nodes, and left-click to add wires. Nodes will emit a positive signal if all the connected wires have the same polarity. The screen has timers to the left, and notes to the right. The default timers are 6 trackers, 4 sequencers and 2 pools.
 
