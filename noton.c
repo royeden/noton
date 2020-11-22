@@ -3,6 +3,17 @@
 #include <porttime.h>
 #include <stdio.h>
 
+/* 
+Copyright (c) 2020 Devine Lu Linvega
+
+Permission to use, copy, modify, and distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE.
+*/
+
 #define HOR 32
 #define VER 16
 #define PAD 8
@@ -11,7 +22,7 @@
 #define color2 0x000000
 #define color3 0xcccccc
 #define color4 0x72dec2
-#define color0 0x32ae82
+#define color0 0xdd5555
 
 #define GATEMAX 128
 #define WIREMAX 256
@@ -40,20 +51,19 @@ typedef struct Wire {
 } Wire;
 
 typedef struct Gate {
-	int id, polarity, locked, inlen, outlen;
-	int channel, note, shrp;
+	int id, polarity, locked, inlen, outlen, channel, note, sharp;
 	Point2d pos;
 	GateType type;
 	Wire *inputs[PORTMAX], *outputs[PORTMAX];
 } Gate;
 
 typedef struct Noton {
-	int alive, frame, speed, channel, octave;
-	int glen, wlen;
+	int alive, frame, channel, octave, glen, wlen;
+	unsigned int speed;
 	Gate gates[GATEMAX];
 	Wire wires[WIREMAX];
-	PmStream *midi;
 	Gate *inputs[INPUTMAX], *outputs[OUTPUTMAX];
+	PmStream *midi;
 } Noton;
 
 typedef struct Brush {
@@ -86,20 +96,12 @@ setpt2d(Point2d *p, int x, int y)
 	return p;
 }
 
-Point2d *
-cpypt2d(Point2d *dst, Point2d *src)
-{
-	dst->x = src->x;
-	dst->y = src->y;
-	return dst;
-}
-
 Point2d
 Pt2d(int x, int y)
 {
-	Point2d pos;
-	setpt2d(&pos, x, y);
-	return pos;
+	Point2d p;
+	setpt2d(&p, x, y);
+	return p;
 }
 
 int
@@ -279,7 +281,7 @@ addgate(Noton *n, GateType type, int polarity, Point2d pos)
 	g->polarity = polarity;
 	g->channel = 0;
 	g->note = 0;
-	g->shrp = 0;
+	g->sharp = 0;
 	g->inlen = 0;
 	g->outlen = 0;
 	g->type = type;
@@ -297,7 +299,7 @@ extendwire(Brush *b)
 		return 0;
 	if(distance(b->wire.points[b->wire.len - 1], b->pos) < 20)
 		return 0;
-	cpypt2d(&b->wire.points[b->wire.len++], &b->pos);
+	setpt2d(&b->wire.points[b->wire.len++], b->pos.x, b->pos.y);
 	return 1;
 }
 
@@ -305,9 +307,10 @@ int
 beginwire(Brush *b)
 {
 	Gate *gate = nearestgate(&noton, b->pos);
+	Point2d *p = gate ? &gate->pos : &b->pos;
 	b->wire.polarity = gate ? gate->polarity : -1;
 	b->wire.len = 0;
-	cpypt2d(&b->wire.points[b->wire.len++], gate ? &gate->pos : &b->pos);
+	setpt2d(&b->wire.points[b->wire.len++], p->x, p->y);
 	return 1;
 }
 
@@ -383,10 +386,10 @@ drawgate(Uint32 *dst, Gate *g)
 			if(distance(Pt2d(g->pos.x, g->pos.y), Pt2d(g->pos.x - r + x, g->pos.y - r + y)) < 18)
 				pixel(dst, g->pos.x - r + x, g->pos.y - r + y, polarcolor(g->polarity));
 	if(g->type == OUTPUT) {
-		pixel(dst, g->pos.x - 1, g->pos.y, g->shrp ? color2 : color1);
-		pixel(dst, g->pos.x + 1, g->pos.y, g->shrp ? color2 : color1);
-		pixel(dst, g->pos.x, g->pos.y - 1, g->shrp ? color2 : color1);
-		pixel(dst, g->pos.x, g->pos.y + 1, g->shrp ? color2 : color1);
+		pixel(dst, g->pos.x - 1, g->pos.y, g->sharp ? color2 : color1);
+		pixel(dst, g->pos.x + 1, g->pos.y, g->sharp ? color2 : color1);
+		pixel(dst, g->pos.x, g->pos.y - 1, g->sharp ? color2 : color1);
+		pixel(dst, g->pos.x, g->pos.y + 1, g->sharp ? color2 : color1);
 	} else if(g->type != POOL)
 		pixel(dst, g->pos.x, g->pos.y, color1);
 }
@@ -471,7 +474,7 @@ setup(Noton *n)
 			n->outputs[j]->locked = 1;
 			n->outputs[j]->note = j + ((i % 3) * 24);
 			n->outputs[j]->channel = i;
-			n->outputs[j]->shrp = sharps[abs(n->outputs[j]->note) % 12];
+			n->outputs[j]->sharp = sharps[abs(n->outputs[j]->note) % 12];
 		}
 	}
 	n->inputs[9]->type = POOL;
@@ -545,7 +548,7 @@ domouse(SDL_Event *event, Brush *b)
 }
 
 void
-dokey(Noton *n, SDL_Event *event, Brush *b)
+dokey(Noton *n, SDL_Event *event)
 {
 	switch(event->key.keysym.sym) {
 	case SDLK_ESCAPE: quit(); break;
@@ -642,7 +645,7 @@ main(int argc, char **argv)
 					event.type == SDL_MOUSEMOTION) {
 				domouse(&event, &brush);
 			} else if(event.type == SDL_KEYDOWN)
-				dokey(&noton, &event, &brush);
+				dokey(&noton, &event);
 			else if(event.type == SDL_WINDOWEVENT)
 				if(event.window.event == SDL_WINDOWEVENT_EXPOSED)
 					redraw(pixels, &brush);
