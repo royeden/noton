@@ -67,7 +67,7 @@ int HEIGHT = 8 * VER + PAD * 2;
 SDL_Window *gWindow = NULL;
 SDL_Renderer *gRenderer = NULL;
 SDL_Texture *gTexture = NULL;
-uint32_t *pixels;
+Uint32 *pixels;
 Noton noton;
 
 /* generics */
@@ -346,14 +346,14 @@ endwire(Brush *b)
 /* draw */
 
 void
-pixel(uint32_t *dst, int x, int y, int color)
+pixel(Uint32 *dst, int x, int y, int color)
 {
 	if(x >= 0 && x < WIDTH - PAD * 2 && y >= 0 && y < HEIGHT - PAD * 2)
 		dst[(y + PAD) * WIDTH + (x + PAD)] = color;
 }
 
 void
-line(uint32_t *dst, int ax, int ay, int bx, int by, int color)
+line(Uint32 *dst, int ax, int ay, int bx, int by, int color)
 {
 	int dx = abs(bx - ax), sx = ax < bx ? 1 : -1;
 	int dy = -abs(by - ay), sy = ay < by ? 1 : -1;
@@ -375,7 +375,7 @@ line(uint32_t *dst, int ax, int ay, int bx, int by, int color)
 }
 
 void
-drawgate(uint32_t *dst, Gate *g)
+drawgate(Uint32 *dst, Gate *g)
 {
 	int x, y, r = 8, d = r * 2;
 	for(y = 0; y < d; ++y)
@@ -392,7 +392,7 @@ drawgate(uint32_t *dst, Gate *g)
 }
 
 void
-drawwire(uint32_t *dst, Wire *w, int color)
+drawwire(Uint32 *dst, Wire *w, int color)
 {
 	int i;
 	if(w->len < 2)
@@ -405,7 +405,7 @@ drawwire(uint32_t *dst, Wire *w, int color)
 }
 
 void
-clear(uint32_t *dst)
+clear(Uint32 *dst)
 {
 	int i, j;
 	for(i = 0; i < HEIGHT; i++)
@@ -414,7 +414,7 @@ clear(uint32_t *dst)
 }
 
 void
-redraw(uint32_t *dst, Brush *b)
+redraw(Uint32 *dst, Brush *b)
 {
 	int i;
 	clear(dst);
@@ -423,7 +423,7 @@ redraw(uint32_t *dst, Brush *b)
 	for(i = 0; i < noton.wlen; i++)
 		drawwire(dst, &noton.wires[i], color2);
 	drawwire(dst, &b->wire, color3);
-	SDL_UpdateTexture(gTexture, NULL, dst, WIDTH * sizeof(uint32_t));
+	SDL_UpdateTexture(gTexture, NULL, dst, WIDTH * sizeof(Uint32));
 	SDL_RenderClear(gRenderer);
 	SDL_RenderCopy(gRenderer, gTexture, NULL, NULL);
 	SDL_RenderPresent(gRenderer);
@@ -590,7 +590,7 @@ init(void)
 		HEIGHT);
 	if(gTexture == NULL)
 		return error("Texture", SDL_GetError());
-	pixels = (uint32_t *)malloc(WIDTH * HEIGHT * sizeof(uint32_t));
+	pixels = (Uint32 *)malloc(WIDTH * HEIGHT * sizeof(Uint32));
 	if(pixels == NULL)
 		return error("Pixels", "Failed to allocate memory");
 	clear(pixels);
