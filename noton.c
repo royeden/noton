@@ -232,7 +232,7 @@ void
 pause(Noton *n)
 {
 	n->alive = !n->alive;
-	printf("Toggle %s\n", n->alive ? "play" : "pause");
+	printf("%s\n", n->alive ? "Playing.." : "Paused.");
 }
 
 void
@@ -290,30 +290,32 @@ addgate(Noton *n, GateType type, int polarity, Point2d pos)
 
 /* Wiring */
 
-void
+int
 extendwire(Brush *b)
 {
 	if(b->wire.len >= WIREPTMAX)
-		return;
+		return 0;
 	if(distance(b->wire.points[b->wire.len - 1], b->pos) < 20)
-		return;
+		return 0;
 	cpypt2d(&b->wire.points[b->wire.len++], &b->pos);
+	return 1;
 }
 
-void
+int
 beginwire(Brush *b)
 {
 	Gate *gate = nearestgate(&noton, b->pos);
 	b->wire.polarity = gate ? gate->polarity : -1;
 	b->wire.len = 0;
 	cpypt2d(&b->wire.points[b->wire.len++], gate ? &gate->pos : &b->pos);
+	return 1;
 }
 
 int
 abandon(Brush *b)
 {
 	b->wire.len = 0;
-	return 0;
+	return 1;
 }
 
 int
@@ -324,27 +326,20 @@ endwire(Brush *b)
 	if(b->wire.len < 1)
 		return abandon(b);
 	gatefrom = nearestgate(&noton, b->wire.points[0]);
-	if(!gatefrom)
+	if(!gatefrom || gatefrom->outlen >= PORTMAX)
+		return abandon(b);
+	if(gatefrom->type == OUTPUT)
 		return abandon(b);
 	gateto = nearestgate(&noton, b->pos);
-	if(!gateto)
+	if(!gateto || gateto->inlen >= PORTMAX)
 		return abandon(b);
-	if(!gateto->type)
-		return abandon(b);
-	if(gatefrom == gateto)
-		return abandon(b);
-	if(gatefrom->outlen >= PORTMAX)
-		return abandon(b);
-	if(gateto->inlen >= PORTMAX)
+	if(gateto->type == INPUT || gatefrom == gateto)
 		return abandon(b);
 	setpt2d(&b->pos, gateto->pos.x, gateto->pos.y);
 	extendwire(b);
-	/* copy */
 	newwire = addwire(&noton, &b->wire, gatefrom, gateto);
-	/* connect */
 	gatefrom->outputs[gatefrom->outlen++] = newwire;
 	gateto->inputs[gateto->inlen++] = newwire;
-	polarize(gateto);
 	return abandon(b);
 }
 
@@ -380,24 +375,9 @@ line(uint32_t *dst, int ax, int ay, int bx, int by, int color)
 }
 
 void
-drawwire(uint32_t *dst, Wire *w, int color)
-{
-	int i;
-	for(i = 0; i < w->len - 1; i++) {
-		Point2d p1 = w->points[i];
-		Point2d *p2 = &w->points[i + 1];
-		if(p2) {
-			line(dst, p1.x, p1.y, p2->x, p2->y, color);
-			if((int)(noton.frame / 3) % w->len != i)
-				line(dst, p1.x, p1.y, p2->x, p2->y, polarcolor(w->polarity));
-		}
-	}
-}
-
-void
 drawgate(uint32_t *dst, Gate *g)
 {
-	int i, x, y, r = 8, d = r * 2;
+	int x, y, r = 8, d = r * 2;
 	for(y = 0; y < d; ++y)
 		for(x = 0; x < d; ++x)
 			if(distance(Pt2d(g->pos.x, g->pos.y), Pt2d(g->pos.x - r + x, g->pos.y - r + y)) < 18)
@@ -409,6 +389,19 @@ drawgate(uint32_t *dst, Gate *g)
 		pixel(dst, g->pos.x, g->pos.y + 1, g->shrp ? color2 : color1);
 	} else if(g->type != POOL)
 		pixel(dst, g->pos.x, g->pos.y, color1);
+}
+
+void
+drawwire(uint32_t *dst, Wire *w, int color)
+{
+	int i;
+	if(w->len < 2)
+		return;
+	for(i = 0; i < w->len - 1; i++) {
+		Point2d *p1 = &w->points[i];
+		Point2d *p2 = &w->points[i + 1];
+		line(dst, p1->x, p1->y, p2->x, p2->y, (int)(noton.frame / 3) % w->len != i ? polarcolor(w->polarity) : color);
+	}
 }
 
 void
@@ -520,8 +513,8 @@ domouse(SDL_Event *event, Brush *b)
 		if(event->button.button == SDL_BUTTON_RIGHT)
 			break;
 		b->down = 1;
-		beginwire(b);
-		redraw(pixels, b);
+		if(beginwire(b))
+			redraw(pixels, b);
 		break;
 	case SDL_MOUSEMOTION:
 		if(event->button.button == SDL_BUTTON_RIGHT)
@@ -530,8 +523,8 @@ domouse(SDL_Event *event, Brush *b)
 			setpt2d(&b->pos,
 				(event->motion.x - (PAD * ZOOM)) / ZOOM,
 				(event->motion.y - (PAD * ZOOM)) / ZOOM);
-			extendwire(b);
-			redraw(pixels, b);
+			if(extendwire(b))
+				redraw(pixels, b);
 		}
 		break;
 	case SDL_MOUSEBUTTONUP:
@@ -545,8 +538,8 @@ domouse(SDL_Event *event, Brush *b)
 			break;
 		}
 		b->down = 0;
-		endwire(b);
-		redraw(pixels, b);
+		if(endwire(b))
+			redraw(pixels, b);
 		break;
 	}
 }
@@ -579,7 +572,6 @@ init(void)
 {
 	if(SDL_Init(SDL_INIT_VIDEO) < 0)
 		return error("Init", SDL_GetError());
-	printf("init\n");
 	gWindow = SDL_CreateWindow("Noton",
 		SDL_WINDOWPOS_UNDEFINED,
 		SDL_WINDOWPOS_UNDEFINED,
