@@ -6,13 +6,18 @@ Right-click to add nodes, and left-click to add wires. Nodes will emit a positiv
 
 ## Build
 
-To build [noton](https://wiki.xxiivv.com/noton), you must have [SDL2](https://wiki.libsdl.org/) and [PortMidi](http://portmedia.sourceforge.net/portmidi/).
+You must have [SDL2](https://wiki.libsdl.org/) and [PortMidi](http://portmedia.sourceforge.net/portmidi/).
 
 ```
 cc noton.c -std=c89 -Os -DNDEBUG -g0 -s -Wall -L/usr/local/lib -lSDL2 -lportmidi -o noton
 ```
 
 ## Controls
+
+### Generics
+
+- `+` Zoom In
+- `-` Zoom Out
 
 ### General
 

@@ -15,5 +15,11 @@ cc -std=c89 -DDEBUG -Wall -Wpedantic -Wshadow -Wextra -Werror=implicit-int -Werr
 # Size
 echo "Size: $(du -sk ./noton)"
 
+if [ -d "$HOME/bin" ] && [ -e ./noton ]
+then
+	cp ./noton $HOME/bin
+    echo "Installed: $HOME/bin" 
+fi
+
 # run
 ./noton
