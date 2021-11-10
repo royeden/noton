@@ -25,6 +25,7 @@ cc noton.c -std=c89 -Os -DNDEBUG -g0 -s -Wall -L/usr/local/lib -lSDL2 -lportmidi
 
 ### General
 
+- `Q` quit
 - `R` or `BACKSPACE` Erase
 - `W` Undo adding a wire (removes last wire)
 - `G` Undo adding a gate (removes last gate)
