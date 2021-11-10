@@ -17,11 +17,11 @@ WITH REGARD TO THIS SOFTWARE.
 #define HOR 32
 #define VER 16
 #define PAD 8
-#define color1 0x000000
-#define color2 0xffffff
-#define color3 0x777777
-#define color4 0x72dec2
-#define color0 0xffb545
+#define color1 0x000000 /* Bg */
+#define color2 0xffffff /* Centers */
+#define color3 0xcccccc /* Unplugged nodes */
+#define color4 0x5b52fe /* Off nodes */
+#define color0 0xff00ff /* On nodes */
 
 #define GATEMAX 128
 #define WIREMAX 256
@@ -57,7 +57,7 @@ typedef struct Gate {
 } Gate;
 
 typedef struct Noton {
-	int alive, frame, channel, octave, glen, wlen;
+	int alive, frame, channel, octave, glen, wlen, quit;
 	unsigned int speed;
 	Gate gates[GATEMAX];
 	Wire wires[WIREMAX];
@@ -274,6 +274,58 @@ addwire(Noton *n, Wire *temp, Gate *from, Gate *to)
 	return w;
 }
 
+void
+removelastwire(Noton *n)
+{
+	if(n->wlen == 0) return;
+	Wire *w = &n->wires[n->wlen - 1];
+	Gate *from = &n->gates[w->a];
+	Gate *to = &n->gates[w->b];
+	w->len = 0;
+	from->outlen--;
+	to->inlen--;
+	n->wlen--;
+	printf("Remove wire #%d(#%d->#%d) \n", w->id, from->id, to->id);
+}
+
+void
+removespecificwire(Noton *n, Wire *w)
+{
+	/* Swap position with the last wire */
+	if(w->id != n->wlen - 1) {
+		Wire last = n->wires[n->wlen - 1];
+		last.id = w->id;
+		n->wires[n->wlen - 1] = *w;
+		n->wires[n->wlen - 1].id = n->wlen - 1;
+		n->wires[w->id] = last;
+	}
+
+	/* Swap wire position to be the last input */
+	Gate *from = &n->gates[w->a];
+	Gate *to = &n->gates[w->b];
+
+	int i;
+	if(from->outlen > 0) {
+		for(i = 0; i < from->outlen - 1; i++) {
+			if(from->outputs[i]->id == w->id) {
+				from->outputs[i] = from->outputs[from->outlen - 1];
+				from->outputs[from->outlen - 1] = w;
+			}
+		}
+		removelastwire(n);
+	}
+
+	if(to->inlen > 0) {
+		for(i = 0; i < to->inlen - 1; i++) {
+			if(to->inputs[i]->id == w->id) {
+				to->inputs[i] = to->inputs[to->inlen - 1];
+				to->inputs[to->inlen - 1] = w;
+			}
+		}
+		removelastwire(n);
+	}
+}
+
 Gate *
 addgate(Noton *n, GateType type, int polarity, Point2d pos)
 {
@@ -291,6 +343,27 @@ addgate(Noton *n, GateType type, int polarity, Point2d pos)
 		abs((pos.y + 4) / 8) * 8);
 	printf("Add gate #%d \n", g->id);
 	return g;
+}
+
+void
+removelastgate(Noton *n)
+{
+	Gate *g = &n->gates[n->glen - 1];
+	if(g->locked) return;
+
+	/* Wire removal */
+	while(g->inlen > 0) {
+		Wire *w = g->inputs[g->inlen - 1];
+		removespecificwire(n, w);
+	}
+
+	while(g->outlen > 0) {
+		Wire *w = g->outputs[g->outlen - 1];
+		removespecificwire(n, w);
+	}
+
+	n->glen--;
+	printf("Remove gate #%d \n", g->id);
 }
 
 /* Wiring */
@@ -573,11 +646,15 @@ void
 dokey(Noton *n, SDL_Event *event)
 {
 	switch(event->key.keysym.sym) {
+	case SDLK_q: n->quit = 1; break;
 	case SDLK_EQUALS:
 	case SDLK_PLUS: modzoom(1); break;
 	case SDLK_UNDERSCORE:
 	case SDLK_MINUS: modzoom(-1); break;
+	case SDLK_r:
 	case SDLK_BACKSPACE: destroy(n); break;
+	case SDLK_w: removelastwire(n); break;
+	case SDLK_g: removelastgate(n); break;
 	case SDLK_SPACE: pause(n); break;
 	case SDLK_UP: modoct(n, 1); break;
 	case SDLK_DOWN: modoct(n, -1); break;
@@ -638,6 +715,7 @@ main(int argc, char **argv)
 	brush.wire.len = 0;
 
 	noton.alive = 1;
+	noton.quit = 0;
 	noton.speed = 40;
 	noton.channel = 0;
 	noton.octave = 2;
@@ -647,7 +725,7 @@ main(int argc, char **argv)
 
 	setup(&noton);
 
-	while(1) {
+	while(noton.quit == 0) {
 		SDL_Event event;
 		if(!begintime)
 			begintime = SDL_GetTicks();
